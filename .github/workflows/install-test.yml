@@ -1,0 +1,43 @@
+name: Install test
+# INSTALL-TEST.md on a fresh GitHub-hosted Windows user: TakeoffPal-Setup.exe from the public link (or, to try a
+# release before it is approved, from that release by its tag).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to test instead of the public link (blank = the public link)
+        required: false
+        default: ''
+
+permissions:
+  contents: write  # Only to read a draft release when a tag is given.
+
+jobs:
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download TakeoffPal-Setup.exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          $out = "$env:RUNNER_TEMP\TakeoffPal-Setup.exe"
+          if ($env:TAG) {
+            gh release download $env:TAG -R $env:GITHUB_REPOSITORY -p TakeoffPal-Setup.exe -O $out
+          } else {
+            curl.exe -fsSL -o $out https://github.com/Timothy-design77/takeoffpal-releases/releases/latest/download/TakeoffPal-Setup.exe
+          }
+          if ($LASTEXITCODE) { throw "download failed ($LASTEXITCODE)" }
+          Write-Host "From: $(if ($env:TAG) { "release $env:TAG" } else { 'the public link' })"
+      - name: Install, save a job, uninstall, reinstall
+        shell: pwsh
+        run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\TakeoffPal-Setup.exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: estimator-logs
+          path: ~/AppData/Local/Estimator/logs/
+          retention-days: 7
