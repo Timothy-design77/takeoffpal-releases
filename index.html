@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download TakeoffPal</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1d2433; background: #f5f7fa; }
+  main { max-width: 780px; margin: 0 auto; padding: 56px 24px; }
+  h1 { margin: 0 0 8px; font-size: 32px; }
+  .lead { margin: 0 0 32px; color: #4a5568; }
+  .os { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+  .card { padding: 20px; background: #fff; border: 2px solid #e2e8f0; border-radius: 12px; }
+  .card.mine { border-color: #2563eb; box-shadow: 0 4px 16px rgba(37, 99, 235, .18); }
+  .card h2 { margin: 0 0 4px; font-size: 20px; }
+  .card p { margin: 0 0 16px; min-height: 42px; color: #4a5568; font-size: 14px; }
+  .yours { display: none; margin-bottom: 4px; color: #2563eb; font-size: 13px; font-weight: 600; }
+  .mine .yours { display: block; }
+  .btn { display: block; padding: 10px; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 600; text-align: center; text-decoration: none; }
+  .btn.soon { background: #edf2f7; color: #718096; }
+  footer { margin-top: 32px; color: #4a5568; font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Download TakeoffPal</h1>
+  <p class="lead">Choose your computer. We've highlighted the one you're on.</p>
+  <div class="os">
+    <section class="card" id="windows">
+      <span class="yours">Your computer</span>
+      <h2>Windows</h2>
+      <p>Windows PC</p>
+      <span class="btn soon">Coming soon</span>
+    </section>
+    <section class="card" id="mac">
+      <span class="yours">Your computer</span>
+      <h2>Mac</h2>
+      <p>Apple Silicon (M1 or later), beta</p>
+      <span class="btn soon">Coming soon</span>
+    </section>
+    <section class="card" id="linux">
+      <span class="yours">Your computer</span>
+      <h2>Linux</h2>
+      <p>&nbsp;</p>
+      <span class="btn soon">Coming soon</span>
+    </section>
+  </div>
+  <footer>
+    <p>Testing TakeoffPal? Read the <a href="https://github.com/Timothy-design77/takeoffpal-releases#readme">tester guide</a>
+      for how to install it, what to test and how to report a problem.</p>
+  </footer>
+</main>
+<script>
+  var ua = navigator.userAgent;
+  var os = /Windows/.test(ua) ? 'windows' : /Android|iPhone|iPad/.test(ua) ? '' : /Mac/.test(ua) ? 'mac' : /Linux|X11|CrOS/.test(ua) ? 'linux' : '';
+  if (os) document.getElementById(os).classList.add('mine');
+</script>
+</body>
+</html>
