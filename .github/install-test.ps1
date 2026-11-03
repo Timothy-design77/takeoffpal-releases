@@ -76,10 +76,10 @@ Running | Stop-Process -Force
 Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
 
 # Steps 6 and 9: a job saved to the default folder, then uninstall keeps it and the settings.
-$job = $null
+$job = $null; $id = $null
 try {
     $app = Start-Estimator
-    $null = Api $app POST '/api/v1/project/create' @{ name = 'Install test' }
+    $id = (Api $app POST '/api/v1/project/create' @{ name = 'Install test' }).project_id
     Stop-Estimator $app
     $job = Join-Path $jobs 'Install test.sqlite'
 } catch { Write-Host $_ }
@@ -95,13 +95,13 @@ Check 'settings and library folder is kept' (@(Get-ChildItem $data -Recurse -Fil
 # Reinstall, silent, and the same job opens.
 $code = (Start-Process $Setup -ArgumentList '/S' -Wait -PassThru).ExitCode
 Check 'silent reinstall' ($code -eq 0 -and (Version).Count -eq 1 -and (Test-Path $key)) "exit $code"
-$opened = ''
+$opened = $null
 try {
     $app = Start-Estimator
-    $opened = (Api $app POST '/api/v1/project/open' @{ path = $job }) | ConvertTo-Json -Depth 20 -Compress
+    $opened = (Api $app POST '/api/v1/project/open' @{ path = $job }).project_id
     Stop-Estimator $app
 } catch { $opened = "error: $_" }
-Check 'the kept job opens after reinstall' ($opened -like '*Install test*') $opened.Substring(0, [Math]::Min(160, $opened.Length))
+Check 'the kept job opens after reinstall' ($id -and $opened -eq $id) "saved $id, opened $opened"
 
 $results | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
 $failed = @($results | Where-Object Result -eq 'FAIL').Count
