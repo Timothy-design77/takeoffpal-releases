@@ -1,7 +1,7 @@
 # TakeoffPal for Windows: tester guide
 
 ## Install
-1. Download TakeoffPal: https://github.com/Timothy-design77/takeoffpal-releases/releases/latest/download/TakeoffPal-Setup.exe
+1. Download TakeoffPal: https://timothy-design77.github.io/takeoffpal-releases/
    If your browser says the file isn't commonly downloaded, choose **Keep**.
 2. Open the file. Windows may say "Windows protected your PC", because TakeoffPal isn't signed yet. Click
    **More info**, then **Run anyway**.
@@ -23,14 +23,15 @@ Anything wrong, slow or confusing is worth reporting.
 Send it straight to Tim, with a screenshot and what you did just before it happened.
 
 ## Updates
-A new version comes from the same link. Download it and open it, just like the first time. Your jobs and
-settings stay.
+A new version comes from the same link. Close Estimator first, then download the new version and open it, just like
+the first time. Your jobs and settings stay.
 
 ## Uninstall
 Close Estimator, then open **Settings › Apps › Installed apps**, find **Estimator** and click **Uninstall**.
 Uninstalling keeps your work:
-- your jobs, in `%USERPROFILE%\Estimator Projects`
-- your settings and library, in `%LOCALAPPDATA%\Estimator`
+- your jobs, in `%USERPROFILE%\Estimator Projects` unless you saved them somewhere else
+- your settings, in `%LOCALAPPDATA%\Estimator`
+- your libraries, where you picked them
 
 Delete those folders yourself if you want them gone.
 
