@@ -72,8 +72,7 @@ Check 'Finish opens Estimator' (Wait { (Running).Count -gt 0 } 90) (((Running) |
 $window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
 Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
 if ($window) {
-    $null = $shell.AppActivate('Estimator')
-    Start-Sleep 30
+    Start-Sleep 10
     try {
         Add-Type -AssemblyName System.Windows.Forms, System.Drawing
         $screen = [Windows.Forms.SystemInformation]::VirtualScreen
