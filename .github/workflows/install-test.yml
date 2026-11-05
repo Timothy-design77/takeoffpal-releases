@@ -35,6 +35,12 @@ jobs:
       - name: Install, save a job, uninstall, reinstall
         shell: pwsh
         run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\TakeoffPal-Setup.exe"
+      - name: Report names in the installed files
+        shell: pwsh
+        run: |
+          $version = Get-ChildItem "$env:LOCALAPPDATA\Programs\Estimator\versions" -Directory | Select-Object -First 1
+          & "$($version.FullName)\runtime\python.exe" -I .github/scan-installed.py $version.FullName
+          if ($LASTEXITCODE) { throw "installed scan failed" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
