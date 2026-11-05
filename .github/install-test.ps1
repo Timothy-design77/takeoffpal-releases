@@ -71,6 +71,17 @@ Check 'Installed apps lists Estimator with its version' ($entry -and $entry.Disp
 Check 'Finish opens Estimator' (Wait { (Running).Count -gt 0 } 90) (((Running) | ForEach-Object Name | Sort-Object -Unique) -join ',')
 $window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
 Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
+if ($window) {
+    Start-Sleep 10
+    try {
+        Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+        $screen = [Windows.Forms.SystemInformation]::VirtualScreen
+        $image = [Drawing.Bitmap]::new($screen.Width, $screen.Height)
+        [Drawing.Graphics]::FromImage($image).CopyFromScreen($screen.Left, $screen.Top, 0, 0, $image.Size)
+        $null = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'screenshots')
+        $image.Save((Join-Path $env:RUNNER_TEMP 'screenshots\estimator-window.png'))
+    } catch { Write-Host "No screenshot: $_" }
+}
 Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { $null = $_.CloseMainWindow() }
 Running | Stop-Process -Force
 Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
