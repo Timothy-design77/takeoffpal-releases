@@ -16,9 +16,8 @@ jobs:
       SOURCE_PROOF_SHA256: 1dfbf68211e9e0811888f40c9e79433047ba31869bf2a77ad77333df5abfb567
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: '3.12.14'
+          persist-credentials: false
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: '24.19.0'
@@ -34,9 +33,10 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/input/TakeoffPal-Source-Proof.zip" "$RUNNER_TEMP"
       - name: Create and verify the DMG
         run: |
+          "$RUNNER_TEMP/disk/TakeoffPal.app/Contents/Resources/bundle/reader/codex-0.162.1/bin/codex" --version
           ln -s /Applications "$RUNNER_TEMP/disk/Applications"
           hdiutil create -volname TakeoffPal -srcfolder "$RUNNER_TEMP/disk" -ov -format UDZO "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg"
-          python -I "$RUNNER_TEMP/source-proof/ship/release_gate.py" "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg" "$RUNNER_TEMP/gate" | tee "$RUNNER_TEMP/output/mac-release-gate.log"
+          "$RUNNER_TEMP/disk/TakeoffPal.app/Contents/Resources/bundle/runtime/bin/python3" -I "$RUNNER_TEMP/source-proof/ship/release_gate.py" "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg" "$RUNNER_TEMP/gate" | tee "$RUNNER_TEMP/output/mac-release-gate.log"
           cd "$RUNNER_TEMP/output"
           shasum -a 256 TakeoffPal-Mac-arm64.dmg > TakeoffPal-Mac-arm64.dmg.sha256
       - name: Install, launch, save, reopen, uninstall
