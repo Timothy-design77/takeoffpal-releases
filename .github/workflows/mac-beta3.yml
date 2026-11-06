@@ -1,0 +1,60 @@
+name: Mac beta3 install proof
+on:
+  push:
+    branches: [t280-allplatform-proof]
+    paths: [.github/workflows/mac-beta3.yml]
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v5.2.0-beta3-d28775f6
+      PAYLOAD_SHA256: 6166914a8c5cb99184ca98db23cbad3bff0afc2c0acbf43c97b06fffdca26b77
+      SOURCE_PROOF_SHA256: 1dfbf68211e9e0811888f40c9e79433047ba31869bf2a77ad77333df5abfb567
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.14'
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: '24.19.0'
+      - name: Download gated payload and source proof from the draft
+        run: |
+          test "$(gh api repos/$GITHUB_REPOSITORY --jq .private)" = false
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          mkdir -p "$RUNNER_TEMP/input" "$RUNNER_TEMP/disk" "$RUNNER_TEMP/output"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p TakeoffPal-Mac-arm64.zip -p TakeoffPal-Source-Proof.zip -D "$RUNNER_TEMP/input"
+          printf '%s  %s\n' "$PAYLOAD_SHA256" "$RUNNER_TEMP/input/TakeoffPal-Mac-arm64.zip" | shasum -a 256 -c -
+          printf '%s  %s\n' "$SOURCE_PROOF_SHA256" "$RUNNER_TEMP/input/TakeoffPal-Source-Proof.zip" | shasum -a 256 -c -
+          ditto -x -k "$RUNNER_TEMP/input/TakeoffPal-Mac-arm64.zip" "$RUNNER_TEMP/disk"
+          ditto -x -k "$RUNNER_TEMP/input/TakeoffPal-Source-Proof.zip" "$RUNNER_TEMP"
+      - name: Create and verify the DMG
+        run: |
+          ln -s /Applications "$RUNNER_TEMP/disk/Applications"
+          hdiutil create -volname TakeoffPal -srcfolder "$RUNNER_TEMP/disk" -ov -format UDZO "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg"
+          python -I "$RUNNER_TEMP/source-proof/ship/release_gate.py" "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg" "$RUNNER_TEMP/gate" | tee "$RUNNER_TEMP/output/mac-release-gate.log"
+          cd "$RUNNER_TEMP/output"
+          shasum -a 256 TakeoffPal-Mac-arm64.dmg > TakeoffPal-Mac-arm64.dmg.sha256
+      - name: Install, launch, save, reopen, uninstall
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg" --output "$RUNNER_TEMP/proof"
+      - name: Attach tested installer to the same draft
+        run: |
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg" "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg.sha256"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-beta3-proof
+          path: |
+            ${{ runner.temp }}/proof/*.png
+            ${{ runner.temp }}/proof/*.log
+            ${{ runner.temp }}/proof/receipt.json
+            ${{ runner.temp }}/output/*.log
+            ${{ runner.temp }}/output/*.sha256
+          retention-days: 7
