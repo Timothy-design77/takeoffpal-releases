@@ -1,8 +1,8 @@
-name: Mac beta3 install proof
+name: Mac beta4 install proof
 on:
   push:
-    branches: [t280-allplatform-proof]
-    paths: [.github/workflows/mac-beta3.yml]
+    branches: [t293-beta4-proof]
+    paths: [.github/workflows/mac-beta4.yml]
 permissions:
   contents: write
 jobs:
@@ -11,9 +11,10 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: v5.2.0-beta3-d28775f6
-      PAYLOAD_SHA256: 6166914a8c5cb99184ca98db23cbad3bff0afc2c0acbf43c97b06fffdca26b77
-      SOURCE_PROOF_SHA256: 1dfbf68211e9e0811888f40c9e79433047ba31869bf2a77ad77333df5abfb567
+      TAG: v5.2.0-beta4-965da3ba
+      PAYLOAD_SHA256: 2320294c9e9772f53b430219816cc9b8343b54e5d04244f2781c12a1b98166a5
+      LIBRARY_SHA256: 351868e0fc6b3c0eaecb9a4a0521766a31a319b233cd7f89169be38a45332ab0
+      SOURCE_PROOF_SHA256: 3aa745977e8d4684f922efddc010d6645015544b15e893fe1fd8731c2452e2db
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,6 +34,7 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/input/TakeoffPal-Source-Proof.zip" "$RUNNER_TEMP"
       - name: Create and verify the DMG
         run: |
+          printf '%s  %s\n' "$LIBRARY_SHA256" "$RUNNER_TEMP/disk/TakeoffPal.app/Contents/Resources/bundle/app/src/estimator/costing/library.csv" | shasum -a 256 -c -
           "$RUNNER_TEMP/disk/TakeoffPal.app/Contents/Resources/bundle/reader/codex-0.162.1/bin/codex" --version
           ln -s /Applications "$RUNNER_TEMP/disk/Applications"
           hdiutil create -volname TakeoffPal -srcfolder "$RUNNER_TEMP/disk" -ov -format UDZO "$RUNNER_TEMP/output/TakeoffPal-Mac-arm64.dmg"
@@ -50,7 +52,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mac-beta3-proof
+          name: mac-beta4-proof
           path: |
             ${{ runner.temp }}/proof/*.png
             ${{ runner.temp }}/proof/*.log

@@ -116,6 +116,14 @@ try {
   page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await launch();
+  const library = await api('/api/v1/library/items'), source = (await api('/api/v1/session')).catalog_source;
+  check('Built-in library connected on a fresh start', library.items.length === 1903
+    && source?.licence_note === library.licence_note && source.licence_note.includes('© 2026 TakeoffPal'),
+    `${library.items.length} items; ${source?.licence_note}`);
+  const chosen = page.getByRole('button', {name: /Library chosen$/});
+  await chosen.waitFor();
+  check('First run shows Library chosen with no picker', await chosen.isDisabled());
+  await page.screenshot({path: path.join(output, '00-library-chosen.png'), fullPage: true});
   await api('/api/v1/ui-prefs', {values: {'estimator.projectFolder': jobs, 'estimator.betaProof': result.sha256}});
   const plan = path.join(output, 'Beta install proof.pdf'); fs.writeFileSync(plan, blankPdf());
   await page.getByRole('button', {name: 'Choose plans', exact: true}).waitFor();
