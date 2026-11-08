@@ -1,0 +1,104 @@
+name: Ship
+# The only way a build becomes the download (Latest). Each installer in the draft release must pass Estimator's
+# ship/release_gate.py on its own system: no readable app source, every app .pyc its commit's source compiled, no private
+# data or secrets, and a commit on combo/v5.2.0, which merges only after CI. Each must then install, open with the
+# built-in library, save a job and reopen it. Only then does this push the release tag (a tag ruleset lets only the ship
+# environment's deploy key create tags) and publish the draft as Latest (published releases are immutable).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release to check and publish (v<version>-<commit8>)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency: ship
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, installer: TakeoffPal-Setup.exe}
+          - {os: ubuntu-latest, installer: TakeoffPal-Linux-x86_64.AppImage}
+          - {os: macos-15, installer: TakeoffPal-Mac-arm64.dmg}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    environment: ship
+    permissions:
+      contents: write  # Only to read the draft release.
+    env:
+      INSTALLER: ${{ matrix.installer }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.14'
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24.19.0'
+      - name: Download the installer from the draft
+        run: |
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
+          cd "$RUNNER_TEMP/in"
+          python -c "import hashlib, sys; assert hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() == open(sys.argv[1] + '.sha256').read().split()[0], 'differs from its .sha256'" "$INSTALLER"
+      - name: Estimator at combo/v5.2.0
+        env:
+          DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/estimator-key" && chmod 600 "$RUNNER_TEMP/estimator-key"
+          GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/estimator-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+            git clone -q --branch combo/v5.2.0 git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
+          rm "$RUNNER_TEMP/estimator-key"
+      - name: Release gate
+        run: |
+          chmod +x "$RUNNER_TEMP/in/$INSTALLER"
+          python -I "$RUNNER_TEMP/estimator/ship/release_gate.py" "$RUNNER_TEMP/in/$INSTALLER" "$RUNNER_TEMP/gate" --7z 7z \
+            --merged-into origin/combo/v5.2.0
+      - name: Install, open, save and reopen
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
+      - name: Install, open, save and reopen
+        if: runner.os != 'Windows'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" \
+            node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/in/$INSTALLER" --output "$RUNNER_TEMP/proof"
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ship
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Push the release tag and publish the draft as Latest
+        env:
+          DEPLOY_KEY: ${{ secrets.RELEASES_DEPLOY_KEY }}
+        run: |
+          assets="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft,assets --jq 'select(.isDraft) | [.assets[].name] | sort | join(" ")')"
+          expected="TakeoffPal-Linux-x86_64.AppImage TakeoffPal-Linux-x86_64.AppImage.sha256 TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256 TakeoffPal-Setup.exe TakeoffPal-Setup.exe.sha256"
+          [ "$assets" = "$expected" ] || { echo "::error::The draft must hold exactly the three installers and their .sha256 files, not: $assets"; exit 1; }
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/releases-key" && chmod 600 "$RUNNER_TEMP/releases-key"
+          GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/releases-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+            git push -q "git@github.com:$GITHUB_REPOSITORY.git" "HEAD:refs/tags/$TAG"
+          rm "$RUNNER_TEMP/releases-key"
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest

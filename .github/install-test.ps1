@@ -25,7 +25,7 @@ function Wait([scriptblock]$until, [int]$seconds) {
 function Start-Estimator {
     $v = (Version)[0].FullName
     $file = Join-Path $env:RUNNER_TEMP "session-$([guid]::NewGuid().ToString('N')).json"
-    $p = Start-Process (Join-Path $v 'runtime\python.exe') -ArgumentList '-B', '-I', '-S', "`"$v\app\launch.py`"", '--no-browser',
+    $p = Start-Process (Join-Path $v 'runtime\python.exe') -ArgumentList '-B', '-I', '-S', "`"$v\app\launch.pyc`"", '--no-browser',
         '--port', '0', '--session-file', "`"$file`"", '--new-window' -WorkingDirectory $v -WindowStyle Hidden -PassThru
     if (-not (Wait { Test-Path $file } 120)) { throw 'Estimator did not start in 120 s' }
     Start-Sleep 1
@@ -79,6 +79,10 @@ Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
 $job = $null; $id = $null
 try {
     $app = Start-Estimator
+    $items = Api $app GET '/api/v1/library/items'
+    $source = (Api $app GET '/api/v1/session').catalog_source
+    $csv = (Get-FileHash (Join-Path (Version)[0].FullName 'app\src\estimator\costing\library.csv')).Hash
+    Check 'built-in library connected on a fresh user, no picker' ($items.items.Count -eq 1903 -and $csv -eq '351868e0fc6b3c0eaecb9a4a0521766a31a319b233cd7f89169be38a45332ab0' -and $source.licence_note -eq $items.licence_note -and $source.licence_note -like '*2026 TakeoffPal*') "$($items.items.Count) items, $csv, $($source.licence_note)"
     $id = (Api $app POST '/api/v1/project/create' @{ name = 'Install test' }).project_id
     Stop-Estimator $app
     $job = Join-Path $jobs 'Install test.sqlite'

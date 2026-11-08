@@ -1,0 +1,34 @@
+name: Mac DMG
+# Wraps the Mac app a draft release holds (TakeoffPal-Mac-arm64.zip, built on the box) as TakeoffPal-Mac-arm64.dmg on a
+# free macOS runner, attaches it to the same draft, and removes the zip. ship.yml then checks the DMG with the others.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release holding TakeoffPal-Mac-arm64.zip and its .sha256
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Wrap the app as a DMG and attach it to the draft
+        run: |
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'TakeoffPal-Mac-arm64.zip*' -D "$RUNNER_TEMP/in"
+          (cd "$RUNNER_TEMP/in" && shasum -a 256 -c TakeoffPal-Mac-arm64.zip.sha256)
+          mkdir "$RUNNER_TEMP/disk" "$RUNNER_TEMP/out"
+          ditto -x -k "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.zip" "$RUNNER_TEMP/disk"
+          ln -s /Applications "$RUNNER_TEMP/disk/Applications"
+          hdiutil create -volname TakeoffPal -srcfolder "$RUNNER_TEMP/disk" -ov -format UDZO "$RUNNER_TEMP/out/TakeoffPal-Mac-arm64.dmg"
+          cd "$RUNNER_TEMP/out" && shasum -a 256 TakeoffPal-Mac-arm64.dmg > TakeoffPal-Mac-arm64.dmg.sha256
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256
+          gh release delete-asset "$TAG" TakeoffPal-Mac-arm64.zip -R "$GITHUB_REPOSITORY" -y
+          gh release delete-asset "$TAG" TakeoffPal-Mac-arm64.zip.sha256 -R "$GITHUB_REPOSITORY" -y
