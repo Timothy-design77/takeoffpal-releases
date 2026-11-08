@@ -7,8 +7,8 @@ $root = Join-Path $env:LOCALAPPDATA 'Programs\Estimator'
 $data = Join-Path $env:LOCALAPPDATA 'Estimator'
 $jobs = Join-Path $env:USERPROFILE 'Estimator Projects'
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Estimator'
-$links = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Estimator.lnk'),
-    (Join-Path ([Environment]::GetFolderPath('Programs')) 'Estimator.lnk'))
+$links = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Takeoff Pal.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Programs')) 'Takeoff Pal.lnk'))
 $results = [Collections.Generic.List[object]]::new()
 function Check([string]$name, [bool]$ok, [string]$detail = '') {
     $results.Add([pscustomobject]@{ Result = $(if ($ok) { 'PASS' } else { 'FAIL' }); Check = $name; Detail = $detail })
@@ -61,19 +61,26 @@ $p = Start-Process $Setup -PassThru
 $shell = New-Object -ComObject WScript.Shell
 for ($i = 0; $i -lt 60 -and -not $p.HasExited; $i++) {
     Start-Sleep 3
-    if ($shell.AppActivate('Estimator Setup')) { Start-Sleep -Milliseconds 300; $shell.SendKeys('{ENTER}') }
+    if ($shell.AppActivate('Takeoff Pal Setup')) { Start-Sleep -Milliseconds 300; $shell.SendKeys('{ENTER}') }
 }
 Check 'Setup with its pages finishes' ($p.HasExited -and $p.ExitCode -eq 0) "exit $($p.ExitCode)"
 Check 'one version installed' ((Version).Count -eq 1) ((Version).Name -join ',')
 Check 'Desktop and Start menu shortcuts' ((Test-Path $links[0]) -and (Test-Path $links[1]))
 $entry = Get-ItemProperty $key -EA SilentlyContinue
-Check 'Installed apps lists Estimator with its version' ($entry -and $entry.DisplayName -eq 'Estimator' -and $entry.DisplayVersion) "$($entry.DisplayVersion)"
+Check 'Installed apps lists Estimator with its version' ($entry -and $entry.DisplayName -eq 'Takeoff Pal' -and $entry.DisplayVersion) "$($entry.DisplayVersion)"
 Check 'Finish opens Estimator' (Wait { (Running).Count -gt 0 } 90) (((Running) | ForEach-Object Name | Sort-Object -Unique) -join ',')
-$window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
-Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
-Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { $null = $_.CloseMainWindow() }
+$window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
+Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
+Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' } | ForEach-Object { $null = $_.CloseMainWindow() }
 Running | Stop-Process -Force
 Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
+# A fresh install opens locked until a license key is pasted. The test opens it by the app's own offline rule: a key
+# with a good check inside the 14-day grace, and the license server unreachable from this runner.
+Add-Content "$env:SystemRoot\System32\drivers\etc\hosts" "`n127.0.0.1 takeoffpal.com`n127.0.0.1 takeoffpal-beta.vercel.app"
+Clear-DnsClientCache
+$null = New-Item -ItemType Directory -Force (Join-Path $data 'settings')
+@{ key = 'install-test'; last_good = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); version = 1 } | ConvertTo-Json |
+    Set-Content (Join-Path $data 'settings\license.json') -Encoding ascii
 
 # Steps 6 and 9: a job saved to the default folder, then uninstall keeps it and the settings.
 $job = $null; $id = $null

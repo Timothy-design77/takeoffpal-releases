@@ -1,7 +1,7 @@
 name: T-296 compiled-only proof
-# One-off, before Estimator#882 and this repository's #2 merge: ship.yml's check job on a proof draft built from
-# Estimator's PR head (its Mac DMG already wrapped by mac-dmg.yml's steps in run 42434223398), with the gate from that
-# branch and --merged-into that branch. It publishes nothing; ship.yml can only be dispatched once it is on main.
+# One-off, for Estimator branch t303-unblock-combo-ci (combo/v5.2.0 with #883 to #887): ship.yml's Windows check job
+# on a proof draft built from that branch's head, with the gate from that branch and --merged-into that branch. Estimator
+# CI's windows-installer-ci reads this run's result. It publishes nothing; the draft is deleted after the run.
 on:
   push:
     branches: [t296-proof]
@@ -12,24 +12,16 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  TAG: v5.2.0-t296proof-f32df5d0
+  TAG: v5.2.0-t296proof-aed8ba72
+  INSTALLER: TakeoffPal-Setup.exe
 
 jobs:
   check:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {os: windows-latest, installer: TakeoffPal-Setup.exe}
-          - {os: ubuntu-latest, installer: TakeoffPal-Linux-x86_64.AppImage}
-          - {os: macos-15, installer: TakeoffPal-Mac-arm64.dmg}
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     timeout-minutes: 40
     environment: ship
     permissions:
       contents: write  # Only to read the draft release.
-    env:
-      INSTALLER: ${{ matrix.installer }}
     defaults:
       run:
         shell: bash
@@ -42,9 +34,6 @@ jobs:
         run: |
           uv python install 3.12.14
           echo "PYTHON=$(uv python find 3.12.14)" >> "$GITHUB_ENV"
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: '24.19.0'
       - name: Download the installer from the draft
         run: |
           test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
@@ -57,20 +46,12 @@ jobs:
         run: |
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/estimator-key" && chmod 600 "$RUNNER_TEMP/estimator-key"
           GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/estimator-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-            git clone -q --branch ship/protected-workflow git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
+            git clone -q --branch t303-unblock-combo-ci git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
           rm "$RUNNER_TEMP/estimator-key"
       - name: Release gate
         run: |
-          chmod +x "$RUNNER_TEMP/in/$INSTALLER"
           "$PYTHON" -I "$RUNNER_TEMP/estimator/ship/release_gate.py" "$RUNNER_TEMP/in/$INSTALLER" "$RUNNER_TEMP/gate" --7z 7z \
-            --merged-into origin/ship/protected-workflow
+            --merged-into origin/t303-unblock-combo-ci
       - name: Install, open, save and reopen
-        if: runner.os == 'Windows'
         shell: pwsh
         run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
-      - name: Install, open, save and reopen
-        if: runner.os != 'Windows'
-        run: |
-          npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
-          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" \
-            node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/in/$INSTALLER" --output "$RUNNER_TEMP/proof"
