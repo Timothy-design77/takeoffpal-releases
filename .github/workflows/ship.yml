@@ -43,9 +43,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12.14'
+      - uses: astral-sh/setup-uv@v6
+      - name: Python 3.12.14, the build the installers ship
+        run: |
+          uv python install 3.12.14
+          echo "PYTHON=$(uv python find 3.12.14)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: '24.19.0'
@@ -54,7 +56,7 @@ jobs:
           test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
           cd "$RUNNER_TEMP/in"
-          python -c "import hashlib, sys; assert hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() == open(sys.argv[1] + '.sha256').read().split()[0], 'differs from its .sha256'" "$INSTALLER"
+          "$PYTHON" -c "import hashlib, sys; assert hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() == open(sys.argv[1] + '.sha256').read().split()[0], 'differs from its .sha256'" "$INSTALLER"
       - name: Estimator at combo/v5.2.0
         env:
           DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
@@ -66,7 +68,7 @@ jobs:
       - name: Release gate
         run: |
           chmod +x "$RUNNER_TEMP/in/$INSTALLER"
-          python -I "$RUNNER_TEMP/estimator/ship/release_gate.py" "$RUNNER_TEMP/in/$INSTALLER" "$RUNNER_TEMP/gate" --7z 7z \
+          "$PYTHON" -I "$RUNNER_TEMP/estimator/ship/release_gate.py" "$RUNNER_TEMP/in/$INSTALLER" "$RUNNER_TEMP/gate" --7z 7z \
             --merged-into origin/combo/v5.2.0
       - name: Install, open, save and reopen
         if: runner.os == 'Windows'
