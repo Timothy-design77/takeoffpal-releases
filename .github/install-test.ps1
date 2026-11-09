@@ -14,8 +14,8 @@ $root = Join-Path $env:LOCALAPPDATA 'Programs\Estimator'
 $data = Join-Path $env:LOCALAPPDATA 'Estimator'
 $jobs = Join-Path $env:USERPROFILE 'Estimator Projects'
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Estimator'
-$links = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Estimator.lnk'),
-    (Join-Path ([Environment]::GetFolderPath('Programs')) 'Estimator.lnk'))
+$links = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Takeoff Pal.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Programs')) 'Takeoff Pal.lnk'))
 $results = [Collections.Generic.List[object]]::new()
 function Check([string]$name, [bool]$ok, [string]$detail = '') {
     $detail = $detail.Replace($beta, '***')
@@ -87,22 +87,22 @@ $head = [IO.File]::ReadAllBytes($Setup)[0..1]
 Check 'downloaded Setup is one Windows program' ($head[0] -eq 0x4D -and $head[1] -eq 0x5A) "$bytes bytes, SHA-256 $((Get-FileHash $Setup).Hash)"
 Check 'fresh user: no Estimator, no job folder, no settings' (-not (Test-Path $root) -and -not (Test-Path $key) -and -not (Test-Path $jobs) -and -not (Test-Path $data))
 
-# Steps 2-4: Setup with its pages. Finish (Open Estimator ticked) opens Estimator.
+# Steps 2-4: Setup with its pages. Finish (Open Takeoff Pal ticked) opens Takeoff Pal.
 $p = Start-Process $Setup -PassThru
 $shell = New-Object -ComObject WScript.Shell
 for ($i = 0; $i -lt 60 -and -not $p.HasExited; $i++) {
     Start-Sleep 3
-    if ($shell.AppActivate('Estimator Setup')) { Start-Sleep -Milliseconds 300; $shell.SendKeys('{ENTER}') }
+    if ($shell.AppActivate('Takeoff Pal Setup')) { Start-Sleep -Milliseconds 300; $shell.SendKeys('{ENTER}') }
 }
 Check 'Setup with its pages finishes' ($p.HasExited -and $p.ExitCode -eq 0) "exit $($p.ExitCode)"
 Check 'one version installed' ((Version).Count -eq 1) ((Version).Name -join ',')
 Check 'Desktop and Start menu shortcuts' ((Test-Path $links[0]) -and (Test-Path $links[1]))
 $entry = Get-ItemProperty $key -EA SilentlyContinue
-Check 'Installed apps lists Estimator with its version' ($entry -and $entry.DisplayName -eq 'Estimator' -and $entry.DisplayVersion) "$($entry.DisplayVersion)"
-Check 'Finish opens Estimator' (Wait { (Running).Count -gt 0 } 90) (((Running) | ForEach-Object Name | Sort-Object -Unique) -join ',')
-$window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
-Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
-Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { $null = $_.CloseMainWindow() }
+Check 'Installed apps lists Takeoff Pal with its version' ($entry -and $entry.DisplayName -eq 'Takeoff Pal' -and $entry.DisplayVersion) "$($entry.DisplayVersion)"
+Check 'Finish opens Takeoff Pal' (Wait { (Running).Count -gt 0 } 90) (((Running) | ForEach-Object Name | Sort-Object -Unique) -join ',')
+$window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
+Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
+Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' } | ForEach-Object { $null = $_.CloseMainWindow() }
 Running | Stop-Process -Force
 Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
 
