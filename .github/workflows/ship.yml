@@ -73,13 +73,30 @@ jobs:
       - name: Install, open, save and reopen
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          TAKEOFFPAL_BETA_KEY: ${{ secrets.TAKEOFFPAL_BETA_KEY }}
+          TAKEOFFPAL_EXPECT: open
         run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
       - name: Install, open, save and reopen
         if: runner.os != 'Windows'
+        env:
+          TAKEOFFPAL_BETA_KEY: ${{ secrets.TAKEOFFPAL_BETA_KEY }}
+          TAKEOFFPAL_EXPECT: open
         run: |
           npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" \
             node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/in/$INSTALLER" --output "$RUNNER_TEMP/proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proof-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/proof/*.png
+            ${{ runner.temp }}/proof/*.log
+            ${{ runner.temp }}/proof/*.json
+            ${{ runner.temp }}/proof/*.txt
+            ${{ runner.temp }}/proof/logs/
+          retention-days: 7
 
   publish:
     needs: check
