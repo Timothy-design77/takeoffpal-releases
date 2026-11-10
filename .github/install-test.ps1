@@ -32,6 +32,13 @@ function Start-Estimator {
     $s = Get-Content $file -Raw | ConvertFrom-Json
     $app = @{ Origin = $s.origin; Token = $s.token; Process = $p }
     if (-not (Wait { try { (Api $app GET '/api/v1/startup').status -eq 'ready' } catch { $false } } 120)) { throw 'Estimator never became ready' }
+    # T-323: the beta build holds everything behind the Beta Agreement; accept it the way the screen does, then wait
+    # for the license check that follows Agree (offline grace here).
+    $consent = $null; try { $consent = Api $app GET '/api/v1/consent' } catch {}
+    if ($consent -and -not $consent.accepted) {
+        $null = Api $app POST '/api/v1/consent' @{ choice = 'accepted'; shown_text_sha256 = ('0' * 64) }
+        if (-not (Wait { try { (Api $app GET '/api/v1/license').allowed } catch { $false } } 60)) { throw 'license not allowed after Agree' }
+    }
     $app
 }
 function Api($app, [string]$method, [string]$path, $body = $null) {
