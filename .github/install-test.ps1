@@ -1,16 +1,24 @@
 # INSTALL-TEST.md on a fresh Windows user (CI only; never on a PC with a real Estimator): Setup with its pages
 # (Enter for Finish, which opens Estimator), a job saved to the default folder, uninstall, the job and settings kept,
-# then a silent reinstall that opens the same job.
+# then a silent reinstall that opens the same job. TakeoffPal is locked until TAKEOFFPAL_BETA_KEY is entered:
+# TAKEOFFPAL_EXPECT=open (default) proves the key opens it; locked proves the key is refused and the gate holds.
 param([Parameter(Mandatory)][string]$Setup)
 $ErrorActionPreference = 'Stop'
+$beta = $env:TAKEOFFPAL_BETA_KEY
+$expect = if ($env:TAKEOFFPAL_EXPECT) { $env:TAKEOFFPAL_EXPECT } else { 'open' }
+if (-not $beta) { throw 'TAKEOFFPAL_BETA_KEY is empty: add the TAKEOFFPAL_BETA_KEY secret; without a key TakeoffPal stays locked' }
+if ($expect -notin 'open', 'locked') { throw "TAKEOFFPAL_EXPECT must be open or locked, not '$expect'" }
+$proof = Join-Path $env:RUNNER_TEMP 'proof'
+$null = New-Item -ItemType Directory -Force $proof
 $root = Join-Path $env:LOCALAPPDATA 'Programs\Estimator'
 $data = Join-Path $env:LOCALAPPDATA 'Estimator'
 $jobs = Join-Path $env:USERPROFILE 'Estimator Projects'
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Estimator'
-$links = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Estimator.lnk'),
-    (Join-Path ([Environment]::GetFolderPath('Programs')) 'Estimator.lnk'))
+$links = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Takeoff Pal.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Programs')) 'Takeoff Pal.lnk'))
 $results = [Collections.Generic.List[object]]::new()
 function Check([string]$name, [bool]$ok, [string]$detail = '') {
+    $detail = $detail.Replace($beta, '***')
     $results.Add([pscustomobject]@{ Result = $(if ($ok) { 'PASS' } else { 'FAIL' }); Check = $name; Detail = $detail })
     Write-Host ("{0} {1} {2}" -f $results[-1].Result, $name, $detail)
 }
@@ -49,6 +57,29 @@ function Uninstall {
     $null = Start-Process $entry.UninstallString.Trim('"') -ArgumentList '/S' -Wait -PassThru
     Wait { -not (Test-Path $key) } 90  # It hands over to a copy of itself in TEMP.
 }
+# HTTP status of a GET, without throwing on 4xx.
+function Status($app, [string]$path) { (Invoke-WebRequest "$($app.Origin)$path" -Headers @{ 'x-estimator-session' = $app.Token } -SkipHttpErrorCheck).StatusCode }
+# A headless Edge screenshot of the app's page with its session, saved in the proof folder.
+function Shot($app, [string]$name) {
+    $png = Join-Path $proof $name
+    $edge = Start-Process "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe" -PassThru -ArgumentList '--headless', '--disable-gpu',
+        "--user-data-dir=`"$env:RUNNER_TEMP\edge`"", '--window-size=1440,900', '--virtual-time-budget=10000', "--screenshot=`"$png`"",
+        "`"$($app.Origin)/#session=$($app.Token)`""
+    if (-not (Wait { $edge.HasExited } 90)) { $edge.Kill($true) }
+    Check "screenshot $name" (Test-Path $png) $png
+}
+function Finish {
+    $logs = Join-Path $proof 'logs'
+    $null = New-Item -ItemType Directory -Force $logs
+    Get-ChildItem (Join-Path $data 'logs') -Recurse -File -EA SilentlyContinue | ForEach-Object {
+        [IO.File]::WriteAllText((Join-Path $logs $_.Name), [IO.File]::ReadAllText($_.FullName).Replace($beta, '***')) }
+    $table = $results | Format-Table -AutoSize | Out-String -Width 300
+    Write-Host $table
+    Set-Content (Join-Path $proof 'results.txt') $table
+    $failed = @($results | Where-Object Result -eq 'FAIL').Count
+    if ($failed) { throw "$failed of $($results.Count) checks failed" }
+    Write-Host "Install test: PASS ($($results.Count) checks, expect $expect)"
+}
 function Snapshot($file) { $i = Get-Item -LiteralPath $file; "$($i.Name) $($i.Length) bytes $($i.LastWriteTimeUtc.ToString('o')) $((Get-FileHash -LiteralPath $file).Hash)" }
 
 $bytes = (Get-Item $Setup).Length
@@ -56,24 +87,50 @@ $head = [IO.File]::ReadAllBytes($Setup)[0..1]
 Check 'downloaded Setup is one Windows program' ($head[0] -eq 0x4D -and $head[1] -eq 0x5A) "$bytes bytes, SHA-256 $((Get-FileHash $Setup).Hash)"
 Check 'fresh user: no Estimator, no job folder, no settings' (-not (Test-Path $root) -and -not (Test-Path $key) -and -not (Test-Path $jobs) -and -not (Test-Path $data))
 
-# Steps 2-4: Setup with its pages. Finish (Open Estimator ticked) opens Estimator.
+# Steps 2-4: Setup with its pages. Finish (Open Takeoff Pal ticked) opens Takeoff Pal.
 $p = Start-Process $Setup -PassThru
 $shell = New-Object -ComObject WScript.Shell
 for ($i = 0; $i -lt 60 -and -not $p.HasExited; $i++) {
     Start-Sleep 3
-    if ($shell.AppActivate('Estimator Setup')) { Start-Sleep -Milliseconds 300; $shell.SendKeys('{ENTER}') }
+    if ($shell.AppActivate('Takeoff Pal Setup')) { Start-Sleep -Milliseconds 300; $shell.SendKeys('{ENTER}') }
 }
 Check 'Setup with its pages finishes' ($p.HasExited -and $p.ExitCode -eq 0) "exit $($p.ExitCode)"
 Check 'one version installed' ((Version).Count -eq 1) ((Version).Name -join ',')
 Check 'Desktop and Start menu shortcuts' ((Test-Path $links[0]) -and (Test-Path $links[1]))
 $entry = Get-ItemProperty $key -EA SilentlyContinue
-Check 'Installed apps lists Estimator with its version' ($entry -and $entry.DisplayName -eq 'Estimator' -and $entry.DisplayVersion) "$($entry.DisplayVersion)"
-Check 'Finish opens Estimator' (Wait { (Running).Count -gt 0 } 90) (((Running) | ForEach-Object Name | Sort-Object -Unique) -join ',')
-$window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
-Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
-Get-Process | Where-Object { $_.MainWindowTitle -like '*Estimator*' } | ForEach-Object { $null = $_.CloseMainWindow() }
+Check 'Installed apps lists Takeoff Pal with its version' ($entry -and $entry.DisplayName -eq 'Takeoff Pal' -and $entry.DisplayVersion) "$($entry.DisplayVersion)"
+Check 'Finish opens Takeoff Pal' (Wait { (Running).Count -gt 0 } 90) (((Running) | ForEach-Object Name | Sort-Object -Unique) -join ',')
+$window = Wait { @(Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' -and $_.MainWindowTitle -notlike '*Setup*' }).Count -gt 0 } 90
+Check 'its window opens' $window ((Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' } | ForEach-Object { "$($_.Name): $($_.MainWindowTitle)" }) -join '; ')
+Get-Process | Where-Object { $_.MainWindowTitle -like '*Takeoff Pal*' } | ForEach-Object { $null = $_.CloseMainWindow() }
 Running | Stop-Process -Force
 Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
+
+# The license gate: locked with no key, then the key opens it (expect open) or is refused (expect locked).
+# Each screenshot ends its launch, in case the page closes the app when headless Edge exits.
+try {
+    $app = Start-Estimator
+    # The Beta Agreement comes first: until Agree nothing reaches Takeoff Pal, and the license is not even asked.
+    $consent = Api $app GET '/api/v1/consent'
+    Check 'the Beta Agreement comes first, the license waits for it' ($consent.accepted -eq $false -and (Status $app '/api/v1/license') -ne 200) "accepted $($consent.accepted)"
+    $null = Api $app POST '/api/v1/consent' @{ choice = 'accepted'; shown_text_sha256 = ('0' * 64) }
+    $gate = Api $app GET '/api/v1/license'
+    Check 'locked before a key (no_key)' ($gate.allowed -eq $false -and $gate.reason -eq 'no_key') "allowed $($gate.allowed), $($gate.reason)"
+    Check 'the gate holds: library answers 402' ((Status $app '/api/v1/library/items') -eq 402)
+    Shot $app 'gate-before-key.png'
+    Stop-Estimator $app
+    $app = Start-Estimator
+    $license = Api $app POST '/api/v1/license' @{ key = $beta }
+    if ($expect -eq 'locked') {
+        Check 'the key is refused (bad_key or not_paid)' ($license.allowed -eq $false -and $license.reason -in 'bad_key', 'not_paid') "allowed $($license.allowed), $($license.reason)"
+        Check 'still locked: library answers 402' ((Status $app '/api/v1/library/items') -eq 402)
+    } else {
+        Check 'the key opens TakeoffPal' ($license.allowed -eq $true) "allowed $($license.allowed), $($license.reason)"
+    }
+    Shot $app 'gate-after-key.png'
+    Stop-Estimator $app
+} catch { Check 'license gate test ran' $false "$_" }
+if ($expect -eq 'locked') { Finish; return }
 
 # Steps 6 and 9: a job saved to the default folder, then uninstall keeps it and the settings.
 $job = $null; $id = $null
@@ -102,12 +159,11 @@ Check 'silent reinstall' ($code -eq 0 -and (Version).Count -eq 1 -and (Test-Path
 $opened = $null
 try {
     $app = Start-Estimator
+    $reopened = Api $app GET '/api/v1/license'
+    Check 'the saved key opens TakeoffPal after reinstall' ($reopened.allowed -eq $true) "allowed $($reopened.allowed), $($reopened.reason)"
     $opened = (Api $app POST '/api/v1/project/open' @{ path = $job }).project_id
     Stop-Estimator $app
 } catch { $opened = "error: $_" }
 Check 'the kept job opens after reinstall' ($id -and $opened -eq $id) "saved $id, opened $opened"
 
-$results | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
-$failed = @($results | Where-Object Result -eq 'FAIL').Count
-if ($failed) { throw "$failed of $($results.Count) checks failed" }
-Write-Host "Install test: PASS ($($results.Count) checks)"
+Finish

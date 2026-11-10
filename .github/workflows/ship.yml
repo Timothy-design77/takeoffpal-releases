@@ -73,13 +73,30 @@ jobs:
       - name: Install, open, save and reopen
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          TAKEOFFPAL_BETA_KEY: ${{ secrets.TAKEOFFPAL_BETA_KEY }}
+          TAKEOFFPAL_EXPECT: open
         run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
       - name: Install, open, save and reopen
         if: runner.os != 'Windows'
+        env:
+          TAKEOFFPAL_BETA_KEY: ${{ secrets.TAKEOFFPAL_BETA_KEY }}
+          TAKEOFFPAL_EXPECT: open
         run: |
           npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" \
             node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/in/$INSTALLER" --output "$RUNNER_TEMP/proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proof-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/proof/*.png
+            ${{ runner.temp }}/proof/*.log
+            ${{ runner.temp }}/proof/*.json
+            ${{ runner.temp }}/proof/*.txt
+            ${{ runner.temp }}/proof/logs/
+          retention-days: 7
 
   publish:
     needs: check
@@ -97,8 +114,19 @@ jobs:
           DEPLOY_KEY: ${{ secrets.RELEASES_DEPLOY_KEY }}
         run: |
           assets="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft,assets --jq 'select(.isDraft) | [.assets[].name] | sort | join(" ")')"
-          expected="TakeoffPal-Linux-x86_64.AppImage TakeoffPal-Linux-x86_64.AppImage.sha256 TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256 TakeoffPal-Setup.exe TakeoffPal-Setup.exe.sha256"
-          [ "$assets" = "$expected" ] || { echo "::error::The draft must hold exactly the three installers and their .sha256 files, not: $assets"; exit 1; }
+          expected="TakeoffPal-Linux-x86_64.AppImage TakeoffPal-Linux-x86_64.AppImage.sha256 TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256 TakeoffPal-Setup.exe TakeoffPal-Setup.exe.sha256 latest.json latest.json.sig"
+          [ "$assets" = "$expected" ] || { echo "::error::The draft must hold exactly the three installers, their .sha256 files and latest.json(.sig), not: $assets"; exit 1; }
+          # The update note installed builds read must name this release's Windows installer (the app checks the signature).
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -p TakeoffPal-Setup.exe.sha256 -D "$RUNNER_TEMP/note"
+          python3 -I - "$RUNNER_TEMP/note" "$GITHUB_REPOSITORY" "$TAG" <<'EOF'
+          import json, sys
+          d, repo, tag = sys.argv[1:]
+          w = json.load(open(f"{d}/latest.json"))["windows"]
+          url = f"https://github.com/{repo}/releases/download/{tag}/TakeoffPal-Setup.exe"
+          assert w["url"].lower() == url.lower(), f"latest.json windows url {w['url']!r} is not {url}"
+          sha = open(f"{d}/TakeoffPal-Setup.exe.sha256").read().split()[0]
+          assert w["sha256"].lower() == sha.lower(), f"latest.json windows sha256 {w['sha256']!r} is not {sha}"
+          EOF
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/releases-key" && chmod 600 "$RUNNER_TEMP/releases-key"
           GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/releases-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
             git push -q "git@github.com:$GITHUB_REPOSITORY.git" "HEAD:refs/tags/$TAG"
