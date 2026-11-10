@@ -130,6 +130,11 @@ proof: try {
   page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await launch();
+  // The Beta Agreement comes first: until Agree nothing reaches Takeoff Pal, and the license is not even asked.
+  const consent = await api('/api/v1/consent');
+  check('The Beta Agreement comes first, the license waits for it', consent.accepted === false
+    && await status('/api/v1/license') !== 200, `accepted ${consent.accepted}`);
+  await api('/api/v1/consent', {choice: 'accepted', shown_text_sha256: '0'.repeat(64)});
   const gate = await api('/api/v1/license');
   check('Locked before a key (no_key)', gate.allowed === false && gate.reason === 'no_key', `allowed ${gate.allowed}, ${gate.reason}`);
   check('The gate holds: library answers 402', await status('/api/v1/library/items') === 402);

@@ -110,6 +110,10 @@ Check 'Estimator closed' (Wait { (Running).Count -eq 0 } 30)
 # Each screenshot ends its launch, in case the page closes the app when headless Edge exits.
 try {
     $app = Start-Estimator
+    # The Beta Agreement comes first: until Agree nothing reaches Takeoff Pal, and the license is not even asked.
+    $consent = Api $app GET '/api/v1/consent'
+    Check 'the Beta Agreement comes first, the license waits for it' ($consent.accepted -eq $false -and (Status $app '/api/v1/license') -ne 200) "accepted $($consent.accepted)"
+    $null = Api $app POST '/api/v1/consent' @{ choice = 'accepted'; shown_text_sha256 = ('0' * 64) }
     $gate = Api $app GET '/api/v1/license'
     Check 'locked before a key (no_key)' ($gate.allowed -eq $false -and $gate.reason -eq 'no_key') "allowed $($gate.allowed), $($gate.reason)"
     Check 'the gate holds: library answers 402' ((Status $app '/api/v1/library/items') -eq 402)
