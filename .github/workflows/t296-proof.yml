@@ -1,6 +1,6 @@
 name: T-296 compiled-only proof
-# One-off, for Estimator branch t303-unblock-combo-ci (combo/v5.2.0 with #883 to #887): ship.yml's Windows check job
-# on a proof draft built from that branch's head, with the gate from that branch and --merged-into that branch. Estimator
+# One-off, for Estimator branch ship/t313-land (combo/v5.2.0 + #891, #892, #895): ship.yml's Windows check job on a proof
+# draft built from that branch's head, with the gate from that branch (now including the self-update check). Estimator
 # CI's windows-installer-ci reads this run's result. It publishes nothing; the draft is deleted after the run.
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  TAG: v5.2.0-t296proof-aed8ba72
+  TAG: v5.2.0-t296proof-a7a15d09
   INSTALLER: TakeoffPal-Setup.exe
 
 jobs:
@@ -46,12 +46,12 @@ jobs:
         run: |
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/estimator-key" && chmod 600 "$RUNNER_TEMP/estimator-key"
           GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/estimator-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-            git clone -q --branch t303-unblock-combo-ci git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
+            git clone -q --branch ship/t313-land git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
           rm "$RUNNER_TEMP/estimator-key"
       - name: Release gate
         run: |
           "$PYTHON" -I "$RUNNER_TEMP/estimator/ship/release_gate.py" "$RUNNER_TEMP/in/$INSTALLER" "$RUNNER_TEMP/gate" --7z 7z \
-            --merged-into origin/t303-unblock-combo-ci
+            --merged-into origin/ship/t313-land
       - name: Install, open, save and reopen
         shell: pwsh
         run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
