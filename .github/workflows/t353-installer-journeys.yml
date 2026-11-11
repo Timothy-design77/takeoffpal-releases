@@ -4,7 +4,7 @@ name: T-353 installer journeys
 # then the Estimator journeys at ESTIMATOR_REF drive the installed version folder (ESTIMATOR_INSTALLED: its runtime,
 # compiled app and frontend; no Estimator source is checked out). A second fresh user proves a made-up key leaves it
 # locked. The same journeys run on the Mac DMG on macos-15. It publishes nothing and changes no release; screenshots and results are the run's artifacts.
-# Last started: 2026-11-11T08:54:41Z (a push of this file starts a run)
+# Last started: 2026-11-11T09:54:48Z (a push of this file starts a run)
 on:
   push:
     branches: [t353-installer-journeys]
@@ -14,7 +14,7 @@ permissions:
   contents: write  # Only to read a draft release when TAG is one.
 
 env:
-  TAG: v5.2.0-beta6-08b9e0e6
+  TAG: v5.2.0-beta7-dc56aa98
   ESTIMATOR_REF: proof/t353-inst-with-f
   JOURNEYS: J25 J27 J30 J46 J50 J62 J64 J65 J66 J67 J68 J71
   INSTALLER: TakeoffPal-Setup.exe
