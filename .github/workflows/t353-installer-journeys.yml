@@ -15,7 +15,7 @@ permissions:
 env:
   TAG: v5.2.0-beta6-08b9e0e6
   ESTIMATOR_REF: proof/t353-inst-with-f
-  JOURNEYS: J25 J27 J30 J50 J64 J46 J62
+  JOURNEYS: J25 J27 J30 J50 J64 J46 J62 # run 5: harness ticks the agreement until ticked
   INSTALLER: TakeoffPal-Setup.exe
 
 jobs:
