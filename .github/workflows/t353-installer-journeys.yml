@@ -1,0 +1,108 @@
+name: T-353 installer journeys
+# One-off, never on main: the journey suite on the ACTUAL installer. A fresh windows-latest user installs TAG's
+# TakeoffPal-Setup.exe with install-test.ps1 (Setup's pages, first run, the real beta key, uninstall and reinstall),
+# then the Estimator journeys at ESTIMATOR_REF drive the installed version folder (ESTIMATOR_INSTALLED: its runtime,
+# compiled app and frontend; no Estimator source is checked out). A second fresh user proves a made-up key leaves it
+# locked. It publishes nothing and changes no release; screenshots and results are the run's artifacts.
+on:
+  push:
+    branches: [t353-installer-journeys]
+    paths: [.github/workflows/t353-installer-journeys.yml]
+
+permissions:
+  contents: write  # Only to read a draft release when TAG is one.
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  TAG: v5.2.0-beta6-08b9e0e6
+  ESTIMATOR_REF: test/t353-installer-journeys
+  JOURNEYS: J64 J46 J62
+  INSTALLER: TakeoffPal-Setup.exe
+
+jobs:
+  locked:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download the installer
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
+          cd "$RUNNER_TEMP/in" && sha256sum -c "$INSTALLER.sha256"
+      - name: Install, a made-up key is refused, the app stays locked
+        shell: pwsh
+        env:
+          TAKEOFFPAL_BETA_KEY: t353-made-up-key-not-a-real-one
+          TAKEOFFPAL_EXPECT: locked
+        run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: locked-windows
+          path: ${{ runner.temp }}/proof/
+          retention-days: 14
+
+  journeys:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: ship
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24.19.0'
+      - name: Download the installer
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
+          cd "$RUNNER_TEMP/in" && sha256sum -c "$INSTALLER.sha256"
+      - name: Install, first run, the beta key opens it, uninstall and reinstall
+        shell: pwsh
+        env:
+          TAKEOFFPAL_BETA_KEY: ${{ secrets.TAKEOFFPAL_BETA_KEY }}
+        run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
+      - name: The journeys only, no app source, at ESTIMATOR_REF
+        env:
+          DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/estimator-key" && chmod 600 "$RUNNER_TEMP/estimator-key"
+          export GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/estimator-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone -q --filter=blob:none --sparse --branch "$ESTIMATOR_REF" git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
+          git -C "$RUNNER_TEMP/estimator" sparse-checkout set journeys benchmarks/perf
+          rm "$RUNNER_TEMP/estimator-key"
+          test ! -e "$RUNNER_TEMP/estimator/src"
+          echo "Estimator $(git -C "$RUNNER_TEMP/estimator" rev-parse HEAD) ($ESTIMATOR_REF)"
+      - name: The journeys on the installed app
+        run: |
+          versions=("$LOCALAPPDATA/Programs/Estimator/versions/"*/)
+          test "${#versions[@]}" = 1
+          v=$(cygpath -w "${versions[0]%/}")
+          echo "Installed: $v"
+          export ESTIMATOR_INSTALLED="$v" ESTIMATOR_PYTHON="$v\\runtime\\python.exe" PYTHONPATH="$v\\app\\src;$v\\app\\vendor"
+          cd "$RUNNER_TEMP/estimator"
+          node journeys/run.mjs $JOURNEYS --jobs 1 --out "$RUNNER_TEMP/journeys"
+      - name: Keep the screenshots and results, never a profile
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/keep"
+          cd "$RUNNER_TEMP/journeys" 2>/dev/null || exit 0
+          find . \( -name '*.png' -o -name result.json -o -name summary.json -o -name '*.txt' -o -name journey.log \) \
+            -not -path '*/chrome*' -not -path '*/profile*' -exec cp --parents {} "$RUNNER_TEMP/keep" \;
+          find . -type d -name artifacts -exec cp -r --parents {} "$RUNNER_TEMP/keep" \;
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: journeys-windows
+          path: |
+            ${{ runner.temp }}/keep/
+            ${{ runner.temp }}/proof/
+          retention-days: 14
