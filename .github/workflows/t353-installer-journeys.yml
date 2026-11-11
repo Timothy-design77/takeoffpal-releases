@@ -15,8 +15,8 @@ permissions:
 env:
   GH_TOKEN: ${{ github.token }}
   TAG: v5.2.0-beta6-08b9e0e6
-  ESTIMATOR_REF: test/t353-installer-journeys
-  JOURNEYS: J64 J46 J62
+  ESTIMATOR_REF: proof/t353-inst-with-f
+  JOURNEYS: J25 J27 J30 J50 J64 J46 J62
   INSTALLER: TakeoffPal-Setup.exe
 
 jobs:
