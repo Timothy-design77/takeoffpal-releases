@@ -13,7 +13,6 @@ permissions:
   contents: write  # Only to read a draft release when TAG is one.
 
 env:
-  GH_TOKEN: ${{ github.token }}
   TAG: v5.2.0-beta6-08b9e0e6
   ESTIMATOR_REF: proof/t353-inst-with-f
   JOURNEYS: J25 J27 J30 J50 J64 J46 J62
@@ -31,6 +30,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Download the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
           cd "$RUNNER_TEMP/in" && sha256sum -c "$INSTALLER.sha256"
@@ -62,6 +63,8 @@ jobs:
         with:
           node-version: '24.19.0'
       - name: Download the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
           cd "$RUNNER_TEMP/in" && sha256sum -c "$INSTALLER.sha256"
