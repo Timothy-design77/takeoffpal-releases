@@ -3,7 +3,7 @@ name: T-353 installer journeys
 # TakeoffPal-Setup.exe with install-test.ps1 (Setup's pages, first run, the real beta key, uninstall and reinstall),
 # then the Estimator journeys at ESTIMATOR_REF drive the installed version folder (ESTIMATOR_INSTALLED: its runtime,
 # compiled app and frontend; no Estimator source is checked out). A second fresh user proves a made-up key leaves it
-# locked. It publishes nothing and changes no release; screenshots and results are the run's artifacts.
+# locked. The same journeys run on the Mac DMG on macos-15. It publishes nothing and changes no release; screenshots and results are the run's artifacts.
 on:
   push:
     branches: [t353-installer-journeys]
@@ -108,4 +108,70 @@ jobs:
           path: |
             ${{ runner.temp }}/keep/
             ${{ runner.temp }}/proof/
+          retention-days: 14
+
+  mac:
+    runs-on: macos-15
+    timeout-minutes: 60
+    environment: ship
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24.19.0'
+      - name: Download the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p TakeoffPal-Mac-arm64.dmg -p TakeoffPal-Mac-arm64.dmg.sha256 -D "$RUNNER_TEMP/in"
+          cd "$RUNNER_TEMP/in" && shasum -a 256 -c TakeoffPal-Mac-arm64.dmg.sha256
+      - name: Install, the beta key opens it, open, save and reopen
+        env:
+          TAKEOFFPAL_BETA_KEY: ${{ secrets.TAKEOFFPAL_BETA_KEY }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" \
+            node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg" --output "$RUNNER_TEMP/proof"
+      - name: The journeys only, no app source, at ESTIMATOR_REF
+        env:
+          DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/estimator-key" && chmod 600 "$RUNNER_TEMP/estimator-key"
+          export GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/estimator-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone -q --filter=blob:none --sparse --branch "$ESTIMATOR_REF" git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
+          git -C "$RUNNER_TEMP/estimator" sparse-checkout set journeys benchmarks/perf
+          rm "$RUNNER_TEMP/estimator-key"
+          test ! -e "$RUNNER_TEMP/estimator/src"
+          echo "Estimator $(git -C "$RUNNER_TEMP/estimator" rev-parse HEAD) ($ESTIMATOR_REF)"
+      - name: The journeys on the installed app
+        run: |
+          mkdir -p "$RUNNER_TEMP/mounted" "$RUNNER_TEMP/Applications"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mounted" "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
+          ditto "$RUNNER_TEMP/mounted/TakeoffPal.app" "$RUNNER_TEMP/Applications/TakeoffPal.app"
+          hdiutil detach "$RUNNER_TEMP/mounted"
+          v="$RUNNER_TEMP/Applications/TakeoffPal.app/Contents/Resources/bundle"
+          echo "Installed: $v"
+          export ESTIMATOR_INSTALLED="$v" ESTIMATOR_PYTHON="$v/runtime/bin/python3" PYTHONPATH="$v/app/src:$v/app/vendor" \
+            ESTIMATOR_CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+          cd "$RUNNER_TEMP/estimator"
+          node journeys/run.mjs $JOURNEYS --jobs 1 --out "$RUNNER_TEMP/journeys"
+      - name: Keep the screenshots and results, never a profile
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/keep"
+          cd "$RUNNER_TEMP/journeys" 2>/dev/null || exit 0
+          find . \( -name '*.png' -o -name result.json -o -name summary.json -o -name '*.txt' -o -name journey.log \) \
+            -not -path '*/chrome*' -not -path '*/profile*' -exec ditto {} "$RUNNER_TEMP/keep/{}" \;
+          find . -type d -name artifacts -exec ditto {} "$RUNNER_TEMP/keep/{}" \;
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: journeys-mac
+          path: |
+            ${{ runner.temp }}/keep/
+            ${{ runner.temp }}/proof/*.png
+            ${{ runner.temp }}/proof/*.json
+            ${{ runner.temp }}/proof/*.log
           retention-days: 14
