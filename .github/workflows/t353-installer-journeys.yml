@@ -4,7 +4,7 @@ name: T-353 installer journeys
 # then the Estimator journeys at ESTIMATOR_REF drive the installed version folder (ESTIMATOR_INSTALLED: its runtime,
 # compiled app and frontend; no Estimator source is checked out). A second fresh user proves a made-up key leaves it
 # locked. The same journeys run on the Mac DMG on macos-15. It publishes nothing and changes no release; screenshots and results are the run's artifacts.
-# Last started: 2026-11-11T13:37:02Z (a push of this file starts a run)
+# Last started: 2026-11-11T13:48:55Z (a push of this file starts a run)
 on:
   push:
     branches: [t353-installer-journeys]
