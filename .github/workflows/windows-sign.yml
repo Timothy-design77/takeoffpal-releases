@@ -1,0 +1,213 @@
+name: Windows sign
+# When the Azure Artifact Signing values are all set, this signs the PE files
+# inside TakeoffPal-Setup.exe, rebuilds the installer, signs Setup.exe and the
+# uninstaller, and replaces the draft assets. When any of those values is
+# missing, the job succeeds and leaves the unsigned installer in place.
+# Signing changes the installer hash, so latest.json must be stamped after
+# this workflow, or this job fails if the existing note no longer matches.
+# Do not publish. ship.yml is the only path to Latest.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release holding TakeoffPal-Setup.exe and its .sha256
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+      AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+      AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download the unsigned installer from the draft
+        shell: bash
+        run: |
+          set -eu
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p TakeoffPal-Setup.exe -p TakeoffPal-Setup.exe.sha256 -D "$RUNNER_TEMP/in"
+          python .github/windows-sign-tools.py check-sha "$RUNNER_TEMP/in/TakeoffPal-Setup.exe"
+
+      - name: Skip signing when Azure values are absent
+        id: ready
+        shell: bash
+        run: |
+          set +e
+          python .github/windows-sign-tools.py ready
+          status=$?
+          set -e
+          if [ "$status" -eq 2 ]; then
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          echo "sign=true" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login
+        if: steps.ready.outputs.sign == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Unpack the installer
+        if: steps.ready.outputs.sign == 'true'
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP 'extract'
+          & "$env:GITHUB_WORKSPACE\.github\sign-windows.ps1" extract (Join-Path $env:RUNNER_TEMP 'in\TakeoffPal-Setup.exe') $extract
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $build = python "$env:GITHUB_WORKSPACE\.github\windows-sign-tools.py" find-build $extract
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BUILD=$build" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "build folder ready"
+
+      - name: Sign inner PE files
+        if: steps.ready.outputs.sign == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ env.BUILD }}
+          files-folder-filter: exe,dll,pyd,sys,ocx,cpl,scr,efi
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Takeoff Pal
+          description-url: https://takeoffpal.com
+          timeout: 900
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Refresh build-manifest hashes and install NSIS
+        if: steps.ready.outputs.sign == 'true'
+        shell: pwsh
+        run: |
+          python "$env:GITHUB_WORKSPACE\.github\windows-sign-tools.py" update-manifest $env:BUILD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exts = @('.exe', '.dll', '.pyd', '.sys', '.ocx', '.cpl', '.scr', '.efi')
+          $files = Get-ChildItem -LiteralPath $env:BUILD -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $exts -contains $_.Extension.ToLower() }
+          if (-not $files) {
+            Write-Error "no PE files found to verify after signing"
+            exit 1
+          }
+          foreach ($file in $files) {
+            & "$env:GITHUB_WORKSPACE\.github\sign-windows.ps1" verify $file.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          choco install nsis --version=3.11.0 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Rebuild the installer and sign the uninstaller
+        if: steps.ready.outputs.sign == 'true'
+        shell: pwsh
+        run: |
+          $version = python "$env:GITHUB_WORKSPACE\.github\windows-sign-tools.py" version-from-tag $env:TAG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nsisDir = Join-Path $env:GITHUB_WORKSPACE '.github\windows'
+          $script = Join-Path $env:RUNNER_TEMP 'signed.nsi'
+          $hook = Join-Path $nsisDir 'sign-one.ps1'
+          $original = Get-Content -LiteralPath (Join-Path $nsisDir 'Estimator.nsi') -Raw
+          $finalize = "!uninstfinalize 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$hook`" `"%1`"' = 0"
+          $utf8 = New-Object System.Text.UTF8Encoding $false
+          [IO.File]::WriteAllText($script, $original.TrimEnd() + "`r`n" + $finalize + "`r`n", $utf8)
+          $out = Join-Path $env:RUNNER_TEMP 'signed'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            $makensis = "${env:ProgramFiles}\NSIS\makensis.exe"
+          }
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            Write-Error "makensis.exe not found after installing NSIS 3.11.0"
+            exit 1
+          }
+          Push-Location $nsisDir
+          try {
+            & $makensis /NOCD "/DBUILD=$env:BUILD" "/DVERSION=$version" "/DOUTDIR=$out" /DTESTER $script
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+          $built = Join-Path $out "Estimator-Setup-$version.exe"
+          if (-not (Test-Path -LiteralPath $built)) {
+            Write-Error "makensis did not write the expected Setup.exe"
+            exit 1
+          }
+          $final = Join-Path $out 'TakeoffPal-Setup.exe'
+          Move-Item -LiteralPath $built -Destination $final
+          "SIGNED_SETUP=$final" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Sign Setup.exe
+        if: steps.ready.outputs.sign == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ env.SIGNED_SETUP }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Takeoff Pal
+          description-url: https://takeoffpal.com
+          timeout: 300
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Verify, upload, and refuse a stale update note
+        if: steps.ready.outputs.sign == 'true'
+        shell: bash
+        run: |
+          set -eu
+          python .github/windows-sign-tools.py write-sha "$SIGNED_SETUP"
+          pwsh -NoProfile -File .github/sign-windows.ps1 verify "$SIGNED_SETUP"
+          cd "$(dirname "$SIGNED_SETUP")"
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber TakeoffPal-Setup.exe TakeoffPal-Setup.exe.sha256
+          mkdir -p "$RUNNER_TEMP/note"
+          assets="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | join(" ")')"
+          case " $assets " in
+            *" latest.json "*)
+              gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D "$RUNNER_TEMP/note"
+              python "$GITHUB_WORKSPACE/.github/windows-sign-tools.py" check-latest "$RUNNER_TEMP/note/latest.json" "$SIGNED_SETUP.sha256"
+              ;;
+            *)
+              python "$GITHUB_WORKSPACE/.github/windows-sign-tools.py" check-latest - "$SIGNED_SETUP.sha256"
+              ;;
+          esac

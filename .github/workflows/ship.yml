@@ -84,6 +84,27 @@ jobs:
             spctl -a -vvv --type open --context context:primary-signature "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
             xcrun stapler validate "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
           fi
+      - name: When Azure signing values are set, Setup.exe must be Authenticode-signed
+        if: runner.os == 'Windows'
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+        run: |
+          set +e
+          "$PYTHON" -I .github/windows-sign-tools.py ready
+          status=$?
+          set -e
+          if [ "$status" -eq 2 ]; then
+            exit 0
+          fi
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          pwsh -NoProfile -File .github/sign-windows.ps1 verify "$RUNNER_TEMP/in/TakeoffPal-Setup.exe"
       - name: Estimator at combo/v5.2.0
         env:
           DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
