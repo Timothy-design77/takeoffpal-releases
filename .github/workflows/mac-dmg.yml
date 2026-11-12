@@ -1,6 +1,8 @@
 name: Mac DMG
 # Wraps the Mac app a draft release holds (TakeoffPal-Mac-arm64.zip, built on the box) as TakeoffPal-Mac-arm64.dmg on a
 # free macOS runner, attaches it to the same draft, and removes the zip. ship.yml then checks the DMG with the others.
+# When the Apple repository secrets are all set, the app and DMG are signed with Developer ID, notarized, and stapled.
+# When any of those secrets is missing, this produces the same unsigned DMG as before and the job still succeeds.
 on:
   workflow_dispatch:
     inputs:
@@ -14,20 +16,38 @@ permissions:
 jobs:
   dmg:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
+      APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+      APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Wrap the app as a DMG and attach it to the draft
         run: |
+          set -eu
           test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'TakeoffPal-Mac-arm64.zip*' -D "$RUNNER_TEMP/in"
           (cd "$RUNNER_TEMP/in" && shasum -a 256 -c TakeoffPal-Mac-arm64.zip.sha256)
           mkdir "$RUNNER_TEMP/disk" "$RUNNER_TEMP/out"
           ditto -x -k "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.zip" "$RUNNER_TEMP/disk"
           ln -s /Applications "$RUNNER_TEMP/disk/Applications"
+          if [ -n "${APPLE_DEVELOPER_ID_P12:-}" ] && [ -n "${APPLE_DEVELOPER_ID_P12_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ]; then
+            sh .github/sign-and-notarize-mac.sh app "$RUNNER_TEMP/disk/TakeoffPal.app"
+          else
+            echo "Apple secrets absent; attaching an unsigned DMG (same as today)."
+          fi
           hdiutil create -volname TakeoffPal -srcfolder "$RUNNER_TEMP/disk" -ov -format UDZO "$RUNNER_TEMP/out/TakeoffPal-Mac-arm64.dmg"
+          if [ -n "${APPLE_DEVELOPER_ID_P12:-}" ] && [ -n "${APPLE_DEVELOPER_ID_P12_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ]; then
+            sh .github/sign-and-notarize-mac.sh dmg "$RUNNER_TEMP/out/TakeoffPal-Mac-arm64.dmg"
+          fi
           cd "$RUNNER_TEMP/out" && shasum -a 256 TakeoffPal-Mac-arm64.dmg > TakeoffPal-Mac-arm64.dmg.sha256
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256
           gh release delete-asset "$TAG" TakeoffPal-Mac-arm64.zip -R "$GITHUB_REPOSITORY" -y

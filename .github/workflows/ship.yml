@@ -57,6 +57,33 @@ jobs:
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
           cd "$RUNNER_TEMP/in"
           "$PYTHON" -c "import hashlib, sys; assert hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() == open(sys.argv[1] + '.sha256').read().split()[0], 'differs from its .sha256'" "$INSTALLER"
+
+      - name: When latest.json names mac, the DMG must be signed and stapled
+        if: runner.os == 'macOS'
+        run: |
+          set -eu
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -p TakeoffPal-Mac-arm64.dmg.sha256 -D "$RUNNER_TEMP/note"
+          python3 -I - "$RUNNER_TEMP/note" "$GITHUB_REPOSITORY" "$TAG" <<'EOF'
+          import json, sys
+          from pathlib import Path
+          folder, repo, tag = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+          note = json.loads((folder / "latest.json").read_text())
+          mac = note.get("mac")
+          if not mac:
+              print("latest.json has no mac key; unsigned Mac DMG is allowed")
+              (folder / "need-sign").write_text("0\n")
+              raise SystemExit(0)
+          url = f"https://github.com/{repo}/releases/download/{tag}/TakeoffPal-Mac-arm64.dmg"
+          assert mac["url"].lower() == url.lower(), f"latest.json mac url {mac['url']!r} is not {url}"
+          sha = (folder / "TakeoffPal-Mac-arm64.dmg.sha256").read_text().split()[0]
+          assert mac["sha256"].lower() == sha.lower(), f"latest.json mac sha256 {mac['sha256']!r} is not {sha}"
+          (folder / "need-sign").write_text("1\n")
+          EOF
+          if [ "$(cat "$RUNNER_TEMP/note/need-sign")" = 1 ]; then
+            codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
+            spctl -a -vvv --type install "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
+            stapler validate "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
+          fi
       - name: Estimator at combo/v5.2.0
         env:
           DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
@@ -117,15 +144,22 @@ jobs:
           expected="TakeoffPal-Linux-x86_64.AppImage TakeoffPal-Linux-x86_64.AppImage.sha256 TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256 TakeoffPal-Setup.exe TakeoffPal-Setup.exe.sha256 latest.json latest.json.sig"
           [ "$assets" = "$expected" ] || { echo "::error::The draft must hold exactly the three installers, their .sha256 files and latest.json(.sig), not: $assets"; exit 1; }
           # The update note installed builds read must name this release's Windows installer (the app checks the signature).
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -p TakeoffPal-Setup.exe.sha256 -D "$RUNNER_TEMP/note"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -p TakeoffPal-Setup.exe.sha256 -p TakeoffPal-Mac-arm64.dmg.sha256 -D "$RUNNER_TEMP/note"
           python3 -I - "$RUNNER_TEMP/note" "$GITHUB_REPOSITORY" "$TAG" <<'EOF'
           import json, sys
           d, repo, tag = sys.argv[1:]
-          w = json.load(open(f"{d}/latest.json"))["windows"]
+          note = json.load(open(f"{d}/latest.json"))
+          w = note["windows"]
           url = f"https://github.com/{repo}/releases/download/{tag}/TakeoffPal-Setup.exe"
           assert w["url"].lower() == url.lower(), f"latest.json windows url {w['url']!r} is not {url}"
           sha = open(f"{d}/TakeoffPal-Setup.exe.sha256").read().split()[0]
           assert w["sha256"].lower() == sha.lower(), f"latest.json windows sha256 {w['sha256']!r} is not {sha}"
+          if "mac" in note:
+              m = note["mac"]
+              murl = f"https://github.com/{repo}/releases/download/{tag}/TakeoffPal-Mac-arm64.dmg"
+              assert m["url"].lower() == murl.lower(), f"latest.json mac url {m['url']!r} is not {murl}"
+              msha = open(f"{d}/TakeoffPal-Mac-arm64.dmg.sha256").read().split()[0]
+              assert m["sha256"].lower() == msha.lower(), f"latest.json mac sha256 {m['sha256']!r} is not {msha}"
           EOF
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/releases-key" && chmod 600 "$RUNNER_TEMP/releases-key"
           GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/releases-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
