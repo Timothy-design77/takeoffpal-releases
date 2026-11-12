@@ -42,27 +42,26 @@ function Verify-One {
         Write-Error ("Authenticode status for {0} is {1}; expected Valid" -f (Split-Path $Path -Leaf), $status)
         exit 1
     }
+    if (-not $sig.TimeStamperCertificate) {
+        Write-Error ("{0} is signed but has no timestamp" -f (Split-Path $Path -Leaf))
+        exit 1
+    }
     $subject = $sig.SignerCertificate.Subject
     $issuer = $sig.SignerCertificate.Issuer
     $thumb = $sig.SignerCertificate.Thumbprint
-    $stamp = $null
-    if ($sig.TimeStamperCertificate) {
-        $stamp = $sig.TimeStamperCertificate.NotBefore.ToString('o')
-    }
     Write-Host ("OK {0}" -f (Split-Path $Path -Leaf))
     Write-Host ("  subject: {0}" -f $subject)
     Write-Host ("  issuer: {0}" -f $issuer)
     Write-Host ("  thumbprint: {0}" -f $thumb)
-    if ($stamp) { Write-Host ("  timestamp: {0}" -f $stamp) }
     $tool = Find-SignTool
     if ($tool) {
-        & $tool verify /pa /v $Path
+        & $tool verify /pa /tw /v $Path
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "signtool verify /pa failed"
+            Write-Error "signtool verify /pa /tw failed"
             exit 1
         }
     } else {
-        Write-Host "signtool.exe not on PATH; Get-AuthenticodeSignature Status=Valid is the check"
+        Write-Host "signtool.exe not on PATH; Get-AuthenticodeSignature Status=Valid with a timestamp certificate is the check"
     }
 }
 

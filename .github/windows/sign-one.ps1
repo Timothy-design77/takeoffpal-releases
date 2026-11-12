@@ -26,3 +26,6 @@ $params = @{
     TimestampDigest = 'SHA256'
 }
 Invoke-ArtifactSigning @params
+$verify = Join-Path $PSScriptRoot '..\sign-windows.ps1'
+& $verify verify $path
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

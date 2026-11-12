@@ -113,9 +113,14 @@ jobs:
         run: |
           python "$env:GITHUB_WORKSPACE\.github\windows-sign-tools.py" update-manifest $env:BUILD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $samples = Get-ChildItem -LiteralPath $env:BUILD -Recurse -Include *.exe,*.dll -ErrorAction SilentlyContinue |
-            Select-Object -First 3
-          foreach ($file in $samples) {
+          $exts = @('.exe', '.dll', '.pyd', '.sys', '.ocx', '.cpl', '.scr', '.efi')
+          $files = Get-ChildItem -LiteralPath $env:BUILD -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $exts -contains $_.Extension.ToLower() }
+          if (-not $files) {
+            Write-Error "no PE files found to verify after signing"
+            exit 1
+          }
+          foreach ($file in $files) {
             & "$env:GITHUB_WORKSPACE\.github\sign-windows.ps1" verify $file.FullName
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -132,7 +137,7 @@ jobs:
           $script = Join-Path $env:RUNNER_TEMP 'signed.nsi'
           $hook = Join-Path $nsisDir 'sign-one.ps1'
           $original = Get-Content -LiteralPath (Join-Path $nsisDir 'Estimator.nsi') -Raw
-          $finalize = "!uninstfinalize 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$hook`" `"%1`"'"
+          $finalize = "!uninstfinalize 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$hook`" `"%1`"' = 0"
           $utf8 = New-Object System.Text.UTF8Encoding $false
           [IO.File]::WriteAllText($script, $original.TrimEnd() + "`r`n" + $finalize + "`r`n", $utf8)
           $out = Join-Path $env:RUNNER_TEMP 'signed'
@@ -147,7 +152,7 @@ jobs:
           }
           Push-Location $nsisDir
           try {
-            & $makensis "/DBUILD=$env:BUILD" "/DVERSION=$version" "/DOUTDIR=$out" /DTESTER $script
+            & $makensis /NOCD "/DBUILD=$env:BUILD" "/DVERSION=$version" "/DOUTDIR=$out" /DTESTER $script
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } finally {
             Pop-Location
