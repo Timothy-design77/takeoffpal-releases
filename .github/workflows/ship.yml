@@ -81,8 +81,8 @@ jobs:
           EOF
           if [ "$(cat "$RUNNER_TEMP/note/need-sign")" = 1 ]; then
             codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
-            spctl -a -vvv --type install "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
-            stapler validate "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
+            spctl -a -vvv --type open --context context:primary-signature "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
+            xcrun stapler validate "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.dmg"
           fi
       - name: Estimator at combo/v5.2.0
         env:

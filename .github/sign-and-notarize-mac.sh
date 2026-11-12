@@ -23,7 +23,6 @@ need() {
 
 need APPLE_DEVELOPER_ID_P12
 need APPLE_DEVELOPER_ID_P12_PASSWORD
-need APPLE_TEAM_ID
 need APPLE_API_KEY
 need APPLE_API_KEY_ID
 need APPLE_API_ISSUER
@@ -68,7 +67,7 @@ echo "Using codesign identity: $IDENTITY"
 sign_macho() {
   app=$1
   # Deepest Mach-O files first, then the .app bundle. The launcher may be a shell script (not Mach-O).
-  find "$app" -type f ! -name '.*' -print0 | sort -z | while IFS= read -r -d '' f; do
+  find "$app" -type f ! -name '.*' -print0 | while IFS= read -r -d '' f; do
     case "$(file -b "$f")" in
       *Mach-O*) printf '%s\n' "$f" ;;
     esac
@@ -92,8 +91,8 @@ xcrun notarytool submit "$TARGET" --key "$WORKDIR/AuthKey.p8" --key-id "$APPLE_A
   --issuer "$APPLE_API_ISSUER" --wait
 xcrun stapler staple "$TARGET"
 codesign --verify --deep --strict --verbose=2 "$TARGET"
-spctl -a -vvv --type install "$TARGET"
-stapler validate "$TARGET"
+spctl -a -vvv --type open --context context:primary-signature "$TARGET"
+xcrun stapler validate "$TARGET"
 # Confirm the app inside the stapled DMG is accepted for execution.
 MOUNT=$(hdiutil attach -nobrowse -readonly -mountrandom /tmp "$TARGET" | awk -F'\t' '/\/tmp\//{print $NF; exit}')
 [ -n "$MOUNT" ] || { echo "failed to mount $TARGET" >&2; exit 1; }
