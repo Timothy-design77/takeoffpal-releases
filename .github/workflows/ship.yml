@@ -57,6 +57,20 @@ jobs:
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$INSTALLER" -p "$INSTALLER.sha256" -D "$RUNNER_TEMP/in"
           cd "$RUNNER_TEMP/in"
           "$PYTHON" -c "import hashlib, sys; assert hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() == open(sys.argv[1] + '.sha256').read().split()[0], 'differs from its .sha256'" "$INSTALLER"
+      - name: A mac entry in the update note needs a signed, notarized and stapled DMG
+        if: runner.os == 'macOS'
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D "$RUNNER_TEMP/note"
+          mac="$("$PYTHON" -I -c "import json, sys; print(int('mac' in json.load(open(sys.argv[1]))))" "$RUNNER_TEMP/note/latest.json")"
+          if [ "$mac" = 1 ]; then
+            dmg="$RUNNER_TEMP/in/$INSTALLER"
+            xcrun stapler validate "$dmg"
+            codesign --verify --deep --strict --verbose=2 "$dmg"
+            spctl -a -vvv -t open --context context:primary-signature "$dmg" 2>&1 | tee "$RUNNER_TEMP/gatekeeper.txt"
+            grep -q 'source=Notarized Developer ID' "$RUNNER_TEMP/gatekeeper.txt"
+          else
+            echo "latest.json has no mac entry, so the DMG may be unsigned"
+          fi
       - name: Estimator at combo/v5.2.0
         env:
           DEPLOY_KEY: ${{ secrets.ESTIMATOR_DEPLOY_KEY }}
@@ -116,16 +130,23 @@ jobs:
           assets="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft,assets --jq 'select(.isDraft) | [.assets[].name] | sort | join(" ")')"
           expected="TakeoffPal-Linux-x86_64.AppImage TakeoffPal-Linux-x86_64.AppImage.sha256 TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256 TakeoffPal-Setup.exe TakeoffPal-Setup.exe.sha256 latest.json latest.json.sig"
           [ "$assets" = "$expected" ] || { echo "::error::The draft must hold exactly the three installers, their .sha256 files and latest.json(.sig), not: $assets"; exit 1; }
-          # The update note installed builds read must name this release's Windows installer (the app checks the signature).
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -p TakeoffPal-Setup.exe.sha256 -D "$RUNNER_TEMP/note"
+          # The update note installed builds read must name this release's Windows installer (the app checks the signature),
+          # and this release's DMG if it has a mac entry (the check job proved that DMG signed, notarized and stapled).
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -p TakeoffPal-Setup.exe.sha256 \
+            -p TakeoffPal-Mac-arm64.dmg.sha256 -D "$RUNNER_TEMP/note"
           python3 -I - "$RUNNER_TEMP/note" "$GITHUB_REPOSITORY" "$TAG" <<'EOF'
           import json, sys
           d, repo, tag = sys.argv[1:]
-          w = json.load(open(f"{d}/latest.json"))["windows"]
-          url = f"https://github.com/{repo}/releases/download/{tag}/TakeoffPal-Setup.exe"
-          assert w["url"].lower() == url.lower(), f"latest.json windows url {w['url']!r} is not {url}"
-          sha = open(f"{d}/TakeoffPal-Setup.exe.sha256").read().split()[0]
-          assert w["sha256"].lower() == sha.lower(), f"latest.json windows sha256 {w['sha256']!r} is not {sha}"
+          note = json.load(open(f"{d}/latest.json"))
+          installers = {"windows": "TakeoffPal-Setup.exe"}
+          if "mac" in note:
+              installers["mac"] = "TakeoffPal-Mac-arm64.dmg"
+          for key, name in installers.items():
+              w = note[key]
+              url = f"https://github.com/{repo}/releases/download/{tag}/{name}"
+              assert w["url"].lower() == url.lower(), f"latest.json {key} url {w['url']!r} is not {url}"
+              sha = open(f"{d}/{name}.sha256").read().split()[0]
+              assert w["sha256"].lower() == sha.lower(), f"latest.json {key} sha256 {w['sha256']!r} is not {sha}"
           EOF
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/releases-key" && chmod 600 "$RUNNER_TEMP/releases-key"
           GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/releases-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \

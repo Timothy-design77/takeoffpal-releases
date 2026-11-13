@@ -1,6 +1,8 @@
 name: Mac DMG
 # Wraps the Mac app a draft release holds (TakeoffPal-Mac-arm64.zip, built on the box) as TakeoffPal-Mac-arm64.dmg on a
 # free macOS runner, attaches it to the same draft, and removes the zip. ship.yml then checks the DMG with the others.
+# With the six APPLE_* secrets set, .github/sign-and-notarize-mac.sh signs the app with the Developer ID and signs,
+# notarizes and staples the DMG; without them the DMG is unsigned, as before.
 on:
   workflow_dispatch:
     inputs:
@@ -14,20 +16,37 @@ permissions:
 jobs:
   dmg:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 60  # Notarization usually takes minutes, sometimes much longer.
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
     steps:
-      - name: Wrap the app as a DMG and attach it to the draft
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Unpack the app from the draft
         run: |
           test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'TakeoffPal-Mac-arm64.zip*' -D "$RUNNER_TEMP/in"
           (cd "$RUNNER_TEMP/in" && shasum -a 256 -c TakeoffPal-Mac-arm64.zip.sha256)
           mkdir "$RUNNER_TEMP/disk" "$RUNNER_TEMP/out"
           ditto -x -k "$RUNNER_TEMP/in/TakeoffPal-Mac-arm64.zip" "$RUNNER_TEMP/disk"
-          ln -s /Applications "$RUNNER_TEMP/disk/Applications"
-          hdiutil create -volname TakeoffPal -srcfolder "$RUNNER_TEMP/disk" -ov -format UDZO "$RUNNER_TEMP/out/TakeoffPal-Mac-arm64.dmg"
+      - name: Make the DMG (signed, notarized and stapled when the Apple secrets are set)
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: .github/sign-and-notarize-mac.sh "$RUNNER_TEMP/disk" "$RUNNER_TEMP/out/TakeoffPal-Mac-arm64.dmg"
+      - name: Delete the signing keychain and Apple key files
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/apple/signing.keychain-db" 2> /dev/null || true
+          rm -rf "$RUNNER_TEMP/apple"
+      - name: Attach the DMG to the draft and remove the zip
+        run: |
           cd "$RUNNER_TEMP/out" && shasum -a 256 TakeoffPal-Mac-arm64.dmg > TakeoffPal-Mac-arm64.dmg.sha256
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber TakeoffPal-Mac-arm64.dmg TakeoffPal-Mac-arm64.dmg.sha256
           gh release delete-asset "$TAG" TakeoffPal-Mac-arm64.zip -R "$GITHUB_REPOSITORY" -y
