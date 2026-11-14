@@ -73,14 +73,15 @@ jobs:
         run: |
           app="$RUNNER_TEMP/native/TakeoffPal.app" mount="$RUNNER_TEMP/native/mounted" proof="$RUNNER_TEMP/proof"
           windows='(Google Chrome|Microsoft Edge)\.app/Contents/MacOS/.*--app=http://127\.0\.0\.1'
-          mkdir -p "$mount" "$RUNNER_TEMP/native/home" "$proof"
+          mkdir -p "$mount" "$proof"
           hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$RUNNER_TEMP/in/$INSTALLER"
           ditto "$mount/TakeoffPal.app" "$app"
           hdiutil detach "$mount"
           # pgrep exits 1 when nothing matches (fine under -e -o pipefail); 2 or more is a real error and still fails.
           app_windows() { pgrep -f "$windows" || [ $? -eq 1 ]; }
           before=" $(app_windows | tr '\n' ' ') "
-          env -u BROWSER HOME="$RUNNER_TEMP/native/home" "$app/Contents/MacOS/TakeoffPal" > "$RUNNER_TEMP/native/launch.log" 2>&1 &
+          # The runner's own HOME, so the browser finds a login keychain and shows no keychain prompt over the window.
+          env -u BROWSER "$app/Contents/MacOS/TakeoffPal" > "$RUNNER_TEMP/native/launch.log" 2>&1 &
           pid=$!
           started() { for window in $(app_windows); do [[ "$before" == *" $window "* ]] || echo "$window"; done; }
           cleanup() {
