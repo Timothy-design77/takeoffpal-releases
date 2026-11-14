@@ -62,14 +62,16 @@ async function shot(name) {
 }
 // Chrome/Edge main processes running a loopback URL as their own app window (--app=).
 function appWindows() {
+  const profile = `--user-data-dir=${path.join(home, 'Library/Application Support/Estimator/browser')}${path.sep}`;
   return run('ps', ['-axww', '-o', 'pid=,command=']).split('\n')
+    .filter(line => line.includes(profile))
     .map(line => line.match(/^\s*(\d+)\s.*\/(?:Google Chrome|Microsoft Edge)\.app\/Contents\/MacOS\/.*?--app=(http:\/\/127\.0\.0\.1\S*)/))
     .filter(Boolean).map(([, pid, url]) => ({pid: Number(pid), url}));
 }
-// End only the app window this proof started, and only while that pid is still such a window (no pid reuse).
+// End only the attributed app window while its PID and URL still match.
 function closeOwned() {
   if (!owned) return;
-  for (const {pid} of appWindows().filter(window => window.pid === owned.pid)) try { process.kill(pid, 'SIGTERM'); } catch {}
+  for (const {pid} of appWindows().filter(window => window.pid === owned.pid && window.url === owned.url)) try { process.kill(pid, 'SIGTERM'); } catch {}
   owned = undefined;
 }
 async function launch(project, native = false) {
@@ -106,7 +108,9 @@ async function launch(project, native = false) {
     assert.ok(Date.now() < deadline, 'Startup did not become ready');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  if (!native) await page.goto(url);
+  if (native) assert.ok(appWindows().some(window => window.pid === owned.pid && window.url === owned.url),
+    'The app window process exited before startup became ready');
+  else await page.goto(url);
   check(`Installed application launch ${launches}`, true);
 }
 // Mac: with Chrome or Edge present and BROWSER unset, TakeoffPal should open in its own app window (--app=).
