@@ -66,6 +66,40 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright@1.56.1
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright/index.mjs" \
             node .github/check_unix_beta.mjs --artifact "$RUNNER_TEMP/in/$INSTALLER" --output "$RUNNER_TEMP/proof"
+      - name: Capture the Mac app window
+        # A picture for the --app= check above, taken even if that check failed.
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        run: |
+          app="$RUNNER_TEMP/native/TakeoffPal.app" mount="$RUNNER_TEMP/native/mounted" proof="$RUNNER_TEMP/proof"
+          profile="$HOME/Library/Application Support/Estimator/browser/"
+          mkdir -p "$mount" "$proof"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$RUNNER_TEMP/in/$INSTALLER"
+          ditto "$mount/TakeoffPal.app" "$app"
+          hdiutil detach "$mount"
+          app_windows() {
+            ps -axww -o pid=,command= | awk -v profile="$profile" '
+              /\/(Google Chrome|Microsoft Edge)\.app\/Contents\/MacOS\// && index($0, "--user-data-dir=" profile) &&
+              match($0, /--app=http:\/\/127\.0\.0\.1[^[:space:]]*/) { print $1, substr($0, RSTART + 6, RLENGTH - 6) }'
+          }
+          before=" $(app_windows | awk '{print $1}' | tr '\n' ' ') "
+          # The runner's own HOME, so the browser finds a login keychain and shows no keychain prompt over the window.
+          env -u BROWSER "$app/Contents/MacOS/TakeoffPal" > "$RUNNER_TEMP/native/launch.log" 2>&1 &
+          pid=$!
+          owned=''
+          cleanup() {
+            if [[ " $(jobs -pr | tr '\n' ' ') " == *" $pid "* ]]; then kill "$pid" 2>/dev/null || true; fi
+            if [ -n "$owned" ] && app_windows | grep -Fxq -- "$owned"; then
+              kill "${owned%% *}" 2>/dev/null || true
+            fi
+            sed -E "s/([#?&]session=)[^[:space:]\"'&]+/\1[redacted]/g" "$RUNNER_TEMP/native/launch.log" > "$proof/native-launch.log"
+          }
+          trap cleanup EXIT
+          sleep 30
+          while read -r window url; do
+            if [[ "$before" != *" $window "* ]]; then owned="$window $url"; break; fi
+          done < <(app_windows)
+          echo "Attributed --app=http://127.0.0.1 window processes from this launch: $([ -n "$owned" ] && echo 1 || echo 0)"
+          screencapture -x "$proof/native-window.png"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
