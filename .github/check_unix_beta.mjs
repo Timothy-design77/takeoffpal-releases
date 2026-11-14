@@ -15,7 +15,7 @@ assert.ok(options.artifact && options.output, '--artifact and --output are requi
 const key = process.env.TAKEOFFPAL_BETA_KEY, expect = process.env.TAKEOFFPAL_EXPECT || 'open';
 assert.ok(key, 'TAKEOFFPAL_BETA_KEY is empty: add the TAKEOFFPAL_BETA_KEY secret; without a key TakeoffPal stays locked');
 assert.ok(['open', 'locked'].includes(expect), `TAKEOFFPAL_EXPECT must be open or locked, not '${expect}'`);
-const mask = text => String(text).replaceAll(key, '***').replace(/#session=[^\s"']+/g, '#session=[redacted]');
+const mask = text => String(text).replaceAll(key, '***').replace(/([#?&]session=)[^\s"'&]+/g, '$1[redacted]');
 const artifact = path.resolve(options.artifact), output = path.resolve(options.output);
 fs.mkdirSync(output, {recursive: false});
 const home = path.join(output, 'Beta Tester'), applications = path.join(home, 'Applications');
@@ -28,7 +28,10 @@ const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 const env = {...process.env, HOME: home, XDG_DATA_HOME: path.join(home, '.local/share'),
   XDG_CONFIG_HOME: path.join(home, '.config'), TMPDIR: temporary, APPIMAGE_EXTRACT_AND_RUN: '1',
   BROWSER: `${quote(process.execPath)} ${quote(helper)} %s`};
-let installed, executable, child, browser, page, endpoint, token, launches = 0;
+// BROWSER diverts the app's URL into Playwright, so it would hide a Mac fallback to a browser tab: the app window check
+// launches without it.
+const {BROWSER, ...nativeEnv} = env;
+let installed, executable, child, browser, page, endpoint, token, owned, launches = 0;
 const {chromium} = await import(process.env.PLAYWRIGHT_MODULE
   ? pathToFileURL(path.resolve(process.env.PLAYWRIGHT_MODULE)).href : 'playwright');
 
@@ -57,11 +60,25 @@ async function shot(name) {
   await page.waitForTimeout(3000);
   await page.screenshot({path: path.join(output, name), fullPage: true});
 }
-async function launch(project) {
+// Chrome/Edge main processes running a loopback URL as their own app window (--app=).
+function appWindows() {
+  return run('ps', ['-axww', '-o', 'pid=,command=']).split('\n')
+    .map(line => line.match(/^\s*(\d+)\s.*\/(?:Google Chrome|Microsoft Edge)\.app\/Contents\/MacOS\/.*?--app=(http:\/\/127\.0\.0\.1\S*)/))
+    .filter(Boolean).map(([, pid, url]) => ({pid: Number(pid), url}));
+}
+// End only the app window this proof started, and only while that pid is still such a window (no pid reuse).
+function closeOwned() {
+  if (!owned) return;
+  for (const {pid} of appWindows().filter(window => window.pid === owned.pid)) try { process.kill(pid, 'SIGTERM'); } catch {}
+  owned = undefined;
+}
+async function launch(project, native = false) {
   launches += 1;
   const logfile = path.join(output, `launch-${launches}.log`);
   let url, pending = '';
-  child = spawn(executable, project ? ['--project', project] : [], {env, cwd: applications});
+  // App windows already running are not this launch's: only a process that was not there before can pass.
+  const before = new Set(native ? appWindows().map(window => window.pid) : []);
+  child = spawn(executable, project ? ['--project', project] : [], {env: native ? nativeEnv : env, cwd: applications});
   const receive = chunk => {
     pending += chunk.toString();
     for (;;) {
@@ -76,7 +93,10 @@ async function launch(project) {
   const deadline = Date.now() + 120000;
   while (!url) {
     assert.equal(child.exitCode, null, 'Installed application exited before opening its browser');
-    assert.ok(Date.now() < deadline, 'Installed application did not open its browser');
+    assert.ok(Date.now() < deadline, native
+      ? 'No new Chrome/Edge process with an --app=http://127.0.0.1 argument was observed within 120s of launch'
+      : 'Installed application did not open its browser');
+    if (native) url = (owned = appWindows().find(window => !before.has(window.pid)))?.url;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   endpoint = new URL(url).origin;
@@ -86,8 +106,18 @@ async function launch(project) {
     assert.ok(Date.now() < deadline, 'Startup did not become ready');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  await page.goto(url);
+  if (!native) await page.goto(url);
   check(`Installed application launch ${launches}`, true);
+}
+// Mac: with Chrome or Edge present and BROWSER unset, TakeoffPal should open in its own app window (--app=).
+async function appWindow() {
+  if (process.platform !== 'darwin') return;
+  assert.ok(['Google Chrome', 'Microsoft Edge'].some(name => fs.existsSync(`/Applications/${name}.app`)),
+    'Chrome or Edge is installed for the app window check');
+  await launch(undefined, true);
+  check('Opens in its own app window (a new Chrome/Edge --app= process)', true, `pid ${owned.pid} --app=${owned.url}`);
+  await stop();
+  closeOwned();
 }
 async function stop() {
   if (!child || child.exitCode !== null) return;
@@ -147,7 +177,7 @@ proof: try {
   await launch(); await shot('gate-after-key.png');
   if (expect === 'locked') {
     check('Still locked at the next launch: library answers 402', await status('/api/v1/library/items') === 402);
-    await stop(); break proof;  // The gate held; nothing else opens while locked.
+    await stop(); await appWindow(); break proof;  // The gate held; nothing else opens while locked.
   }
   const unlocked = await api('/api/v1/license');
   check('The saved key opens TakeoffPal at the next launch', unlocked.allowed === true, `${unlocked.reason}`);
@@ -188,6 +218,7 @@ proof: try {
   await page.screenshot({path: path.join(output, '03-reopened.png'), fullPage: true});
   check('No browser errors', errors.length === 0, JSON.stringify(errors));
   await stop(); await browser.close(); browser = null;
+  await appWindow();
   const saved = hash(project);
   fs.rmSync(installed, {recursive: true});
   check('Uninstall removes this installation', !fs.existsSync(installed));
@@ -198,6 +229,7 @@ proof: try {
   check('Install proof completed', false, String(error.stack));
 } finally {
   if (child && child.exitCode === null) child.kill('SIGTERM');
+  try { closeOwned(); } catch {}  // A ps failure here must not stop the receipt.
   if (browser) await browser.close();
   result.status = result.checks.every(item => item.pass) ? 'PASS' : 'FAIL';
   fs.writeFileSync(path.join(output, 'receipt.json'), JSON.stringify(result, null, 2) + '\n');
