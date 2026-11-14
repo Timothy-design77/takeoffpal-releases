@@ -80,7 +80,7 @@ jobs:
           env -u BROWSER "$app/Contents/MacOS/TakeoffPal" > "$RUNNER_TEMP/native/launch.log" 2>&1 &
           pid=$!
           cleanup() {
-            kill "$pid" 2>/dev/null || true
+            kill %1 2>/dev/null || true
             sed -E "s/([#?&]session=)[^[:space:]\"'&]+/\1[redacted]/g" "$RUNNER_TEMP/native/launch.log" > "$proof/native-launch.log"
           }
           trap cleanup EXIT
