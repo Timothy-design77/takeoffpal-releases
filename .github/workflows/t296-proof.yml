@@ -12,7 +12,7 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  TAG: v5.2.0-t296proof-2d50938e
+  TAG: v5.2.0-t296proof-f9a7dec1
   INSTALLER: TakeoffPal-Setup.exe
 
 jobs:
