@@ -68,12 +68,6 @@ function appWindows() {
     .map(line => line.match(/^\s*(\d+)\s.*\/(?:Google Chrome|Microsoft Edge)\.app\/Contents\/MacOS\/.*?--app=(http:\/\/127\.0\.0\.1\S*)/))
     .filter(Boolean).map(([, pid, url]) => ({pid: Number(pid), url}));
 }
-// End only the attributed app window while its PID and URL still match.
-function closeOwned() {
-  if (!owned) return;
-  for (const {pid} of appWindows().filter(window => window.pid === owned.pid && window.url === owned.url)) try { process.kill(pid, 'SIGTERM'); } catch {}
-  owned = undefined;
-}
 async function launch(project, native = false) {
   launches += 1;
   const logfile = path.join(output, `launch-${launches}.log`);
@@ -121,7 +115,6 @@ async function appWindow() {
   await launch(undefined, true);
   check('Opens in its own app window (a new Chrome/Edge --app= process)', true, `pid ${owned.pid} --app=${owned.url}`);
   await stop();
-  closeOwned();
 }
 async function stop() {
   if (!child || child.exitCode !== null) return;
@@ -233,7 +226,6 @@ proof: try {
   check('Install proof completed', false, String(error.stack));
 } finally {
   if (child && child.exitCode === null) child.kill('SIGTERM');
-  try { closeOwned(); } catch {}  // A ps failure here must not stop the receipt.
   if (browser) await browser.close();
   result.status = result.checks.every(item => item.pass) ? 'PASS' : 'FAIL';
   fs.writeFileSync(path.join(output, 'receipt.json'), JSON.stringify(result, null, 2) + '\n');
