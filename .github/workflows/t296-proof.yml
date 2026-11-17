@@ -3,7 +3,7 @@ name: T-296 compiled-only proof
 # draft built from that branch's head, with the gate from that branch (including the self-update check and the locked
 # library). Estimator CI's windows-installer-ci can later pin this run. It publishes nothing; the draft is deleted after
 # the run.
-# install-test.ps1 also allows locked library file hash 7d10a7e2… for this same draft (quoting fixed).
+# install-test.ps1 also allows locked library file hash 7d10a7e2… for this same draft (quoting and paren fixed).
 on:
   push:
     branches: [t296-proof]
