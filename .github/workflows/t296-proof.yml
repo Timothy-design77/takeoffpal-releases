@@ -1,8 +1,8 @@
 name: T-296 compiled-only proof
-# One-off, for Estimator branch feat/t423-trade-packages (T-423, exact commit d49e2df2): ship.yml's Windows check job
-# on a proof draft built from that commit, with the gate from that branch (including the self-update check).
-# Estimator CI's windows-installer-ci can later pin this run. It publishes nothing; the draft is deleted after
-# the run.
+# One-off, for Estimator branch t397-lib-lock (PR #963, exact commit 59aa1b4e): ship.yml's Windows check job
+# on a proof draft built from that commit, with the gate from that branch (including the self-update check
+# and the locked library). Estimator CI's windows-installer-ci can later pin this run. It publishes nothing;
+# the draft is deleted after the run.
 on:
   push:
     branches: [t296-proof]
@@ -13,7 +13,7 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  TAG: v5.2.0-t296proof-d49e2df2
+  TAG: v5.2.0-t296proof-59aa1b4e
   INSTALLER: TakeoffPal-Setup.exe
 
 jobs:
@@ -47,14 +47,14 @@ jobs:
         run: |
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/estimator-key" && chmod 600 "$RUNNER_TEMP/estimator-key"
           GIT_SSH_COMMAND="ssh -i '$RUNNER_TEMP/estimator-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-            git clone -q --branch feat/t423-trade-packages git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
+            git clone -q --branch t397-lib-lock git@github.com:Timothy-design77/Estimator.git "$RUNNER_TEMP/estimator"
           git -C "$RUNNER_TEMP/estimator" rev-parse HEAD
-          test "$(git -C "$RUNNER_TEMP/estimator" rev-parse HEAD)" = "d49e2df2cf1c91e1372bc92f9c2d738483a9fc47"
+          test "$(git -C "$RUNNER_TEMP/estimator" rev-parse HEAD)" = "59aa1b4ec9e0d26fde09a8deaa5cc44b3112208a"
           rm "$RUNNER_TEMP/estimator-key"
       - name: Release gate
         run: |
           "$PYTHON" -I "$RUNNER_TEMP/estimator/ship/release_gate.py" "$RUNNER_TEMP/in/$INSTALLER" "$RUNNER_TEMP/gate" --7z 7z \
-            --merged-into origin/feat/t423-trade-packages
+            --merged-into origin/t397-lib-lock
       - name: Install, open, save and reopen
         shell: pwsh
         run: ./.github/install-test.ps1 -Setup "$env:RUNNER_TEMP\in\TakeoffPal-Setup.exe"
